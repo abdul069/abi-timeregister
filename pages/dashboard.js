@@ -1,202 +1,251 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { auth, db } from '../lib/firebase';
-import { signOut, onAuthStateChanged } from 'firebase/auth';
-import { collection, addDoc, query, where, getDocs, doc, setDoc } from 'firebase/firestore';
 
 const Dashboard = () => {
-  const [user, setUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(null);
   const [workStarted, setWorkStarted] = useState(false);
   const [startTime, setStartTime] = useState(null);
   const [attendanceLog, setAttendanceLog] = useState([]);
   const [restaurantName, setRestaurantName] = useState('');
+  const [loading, setLoading] = useState(true);
   const router = useRouter();
 
+  // Load user data on mount
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser(currentUser);
-        loadAttendanceLog(currentUser.uid);
-      } else {
-        router.push('/');
-      }
-    });
+    const user = localStorage.getItem('currentUser');
+    if (!user) {
+      router.push('/');
+      return;
+    }
 
-    return () => unsubscribe();
-  }, []);
+    const userData = JSON.parse(user);
+    setCurrentUser(userData);
 
-  const loadAttendanceLog = async (userId) => {
-    const q = query(collection(db, 'attendance'), where('userId', '==', userId));
-    const querySnapshot = await getDocs(q);
-    const logs = querySnapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-    }));
-    setAttendanceLog(logs);
-  };
+    // Load existing attendance log
+    const log = localStorage.getItem('attendanceLog') || '[]';
+    setAttendanceLog(JSON.parse(log));
 
-  const handleStartWork = async () => {
+    // Load restaurant name
+    const restaurant = localStorage.getItem('restaurantName') || '';
+    setRestaurantName(restaurant);
+
+    setLoading(false);
+  }, [router]);
+
+  const handleStartWork = () => {
     const now = new Date();
     setStartTime(now);
     setWorkStarted(true);
-
-    try {
-      await addDoc(collection(db, 'attendance'), {
-        userId: user.uid,
-        email: user.email,
-        startTime: now.toISOString(),
-        endTime: null,
-        hoursWorked: 0,
-        restaurantName: restaurantName || 'Not specified',
-        status: 'In Progress',
-      });
-    } catch (error) {
-      console.error('Error logging start time:', error);
-    }
   };
 
-  const handleEndWork = async () => {
+  const handleEndWork = () => {
     if (!startTime) return;
 
-    const now = new Date();
-    const hours = Math.round((now - startTime) / (1000 * 60 * 60));
+    const endTime = new Date();
+    const hoursWorked = Math.round((endTime - startTime) / (1000 * 60 * 60) * 2) / 2; // Round to nearest 0.5 hour
 
-    try {
-      const q = query(
-        collection(db, 'attendance'),
-        where('userId', '==', user.uid),
-        where('endTime', '==', null)
-      );
-      const querySnapshot = await getDocs(q);
+    const newRecord = {
+      date: new Date().toISOString().split('T')[0],
+      startTime: startTime.toLocaleTimeString(),
+      endTime: endTime.toLocaleTimeString(),
+      hoursWorked: hoursWorked,
+      restaurant: restaurantName || 'Default',
+    };
 
-      if (querySnapshot.docs.length > 0) {
-        const docId = querySnapshot.docs[0].id;
-        const attendanceRef = doc(db, 'attendance', docId);
-        await setDoc(
-          attendanceRef,
-          {
-            endTime: now.toISOString(),
-            hoursWorked: hours,
-            status: 'Completed',
-          },
-          { merge: true }
-        );
-      }
-
-      setWorkStarted(false);
-      setStartTime(null);
-      loadAttendanceLog(user.uid);
-    } catch (error) {
-      console.error('Error logging end time:', error);
-    }
+    const updatedLog = [...attendanceLog, newRecord];
+    localStorage.setItem('attendanceLog', JSON.stringify(updatedLog));
+    setAttendanceLog(updatedLog);
+    setWorkStarted(false);
+    setStartTime(null);
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      router.push('/');
-    } catch (error) {
-      console.error('Error logging out:', error);
-    }
+  const handleSaveRestaurant = () => {
+    localStorage.setItem('restaurantName', restaurantName);
+    alert('Restaurant name saved!');
   };
+
+  const handleLogout = () => {
+    localStorage.removeItem('currentUser');
+    router.push('/');
+  };
+
+  if (loading) {
+    return <div style={{ padding: '20px' }}>Loading...</div>;
+  }
 
   return (
-    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
-      <h1>ABI TimeRegister Dashboard</h1>
-      {user && <p>Welcome, {user.email}</p>}
-
-      <div style={{ marginBottom: '20px', padding: '15px', border: '1px solid #ddd', borderRadius: '8px' }}>
-        <h2>Clock In/Out</h2>
-        <div style={{ marginBottom: '10px' }}>
-          <label>Restaurant Name:</label>
-          <input
-            type="text"
-            value={restaurantName}
-            onChange={(e) => setRestaurantName(e.target.value)}
-            placeholder="Enter restaurant name"
-            style={{ width: '100%', padding: '8px', marginTop: '5px' }}
-          />
+    <div style={{
+      fontFamily: 'Arial, sans-serif',
+      padding: '20px',
+      backgroundColor: '#f5f5f5',
+      minHeight: '100vh',
+    }}>
+      <div style={{
+        maxWidth: '1000px',
+        margin: '0 auto',
+        backgroundColor: 'white',
+        borderRadius: '8px',
+        padding: '20px',
+        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
+      }}>
+        {/* Header */}
+        <div style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '30px',
+          borderBottom: '1px solid #ddd',
+          paddingBottom: '20px',
+        }}>
+          <div>
+            <h1 style={{ margin: '0 0 5px 0' }}>ABI TimeRegister</h1>
+            <p style={{ margin: '0', color: '#666' }}>
+              Welcome, {currentUser?.email}
+            </p>
+          </div>
+          <button
+            onClick={handleLogout}
+            style={{
+              padding: '10px 20px',
+              backgroundColor: '#dc3545',
+              color: 'white',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            Logout
+          </button>
         </div>
-        <button
-          onClick={handleStartWork}
-          disabled={workStarted}
-          style={{
-            width: '48%',
-            padding: '10px',
-            marginRight: '2%',
-            backgroundColor: workStarted ? '#6c757d' : '#28a745',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: workStarted ? 'not-allowed' : 'pointer',
-          }}
-        >
-          Start Work
-        </button>
-        <button
-          onClick={handleEndWork}
-          disabled={!workStarted}
-          style={{
-            width: '48%',
-            padding: '10px',
-            backgroundColor: !workStarted ? '#6c757d' : '#dc3545',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            cursor: !workStarted ? 'not-allowed' : 'pointer',
-          }}
-        >
-          End Work
-        </button>
-        {startTime && <p>Work started at: {startTime.toLocaleTimeString()}</p>}
-      </div>
 
-      <div style={{ marginBottom: '20px' }}>
-        <h2>Attendance Log</h2>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ backgroundColor: '#f8f9fa' }}>
-              <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'left' }}>Date</th>
-              <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'left' }}>Start Time</th>
-              <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'left' }}>End Time</th>
-              <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'left' }}>Hours Worked</th>
-              <th style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'left' }}>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {attendanceLog.map((log, index) => (
-              <tr key={index}>
-                <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                  {new Date(log.startTime).toLocaleDateString()}
-                </td>
-                <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                  {new Date(log.startTime).toLocaleTimeString()}
-                </td>
-                <td style={{ border: '1px solid #ddd', padding: '8px' }}>
-                  {log.endTime ? new Date(log.endTime).toLocaleTimeString() : 'In Progress'}
-                </td>
-                <td style={{ border: '1px solid #ddd', padding: '8px' }}>{log.hoursWorked}</td>
-                <td style={{ border: '1px solid #ddd', padding: '8px' }}>{log.status}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <button
-        onClick={handleLogout}
-        style={{
-          width: '100%',
-          padding: '10px',
-          backgroundColor: '#dc3545',
-          color: 'white',
-          border: 'none',
+        {/* Restaurant Section */}
+        <div style={{
+          marginBottom: '30px',
+          padding: '15px',
+          backgroundColor: '#f9f9f9',
           borderRadius: '4px',
-          cursor: 'pointer',
-        }}
-      >
-        Logout
-      </button>
+        }}>
+          <h3 style={{ marginTop: '0' }}>Restaurant/Location</h3>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <input
+              type="text"
+              value={restaurantName}
+              onChange={(e) => setRestaurantName(e.target.value)}
+              placeholder="Enter restaurant/location name"
+              style={{
+                flex: '1',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '4px',
+              }}
+            />
+            <button
+              onClick={handleSaveRestaurant}
+              style={{
+                padding: '10px 20px',
+                backgroundColor: '#6c757d',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              Save
+            </button>
+          </div>
+        </div>
+
+        {/* Work Session Controls */}
+        <div style={{
+          marginBottom: '30px',
+          padding: '20px',
+          backgroundColor: '#e8f4f8',
+          borderRadius: '4px',
+          textAlign: 'center',
+        }}>
+          <h3 style={{ marginTop: '0' }}>Work Session</h3>
+          {!workStarted ? (
+            <button
+              onClick={handleStartWork}
+              style={{
+                padding: '15px 40px',
+                fontSize: '18px',
+                backgroundColor: '#28a745',
+                color: 'white',
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              Start Work
+            </button>
+          ) : (
+            <div>
+              <p style={{ color: '#28a745', fontSize: '16px', fontWeight: 'bold' }}>
+                ⏱️ Work Session Active
+              </p>
+              <button
+                onClick={handleEndWork}
+                style={{
+                  padding: '15px 40px',
+                  fontSize: '18px',
+                  backgroundColor: '#dc3545',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                }}
+              >
+                End Work
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Attendance Log */}
+        <div>
+          <h3>Attendance Log</h3>
+          {attendanceLog.length === 0 ? (
+            <p style={{ color: '#666' }}>No work sessions recorded yet.</p>
+          ) : (
+            <table style={{
+              width: '100%',
+              borderCollapse: 'collapse',
+              marginTop: '10px',
+            }}>
+              <thead>
+                <tr style={{ backgroundColor: '#f0f0f0', borderBottom: '2px solid #ddd' }}>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Date</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Start Time</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>End Time</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Hours</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Location</th>
+                </tr>
+              </thead>
+              <tbody>
+                {attendanceLog.map((record, index) => (
+                  <tr
+                    key={index}
+                    style={{
+                      borderBottom: '1px solid #ddd',
+                      backgroundColor: index % 2 === 0 ? '#fff' : '#f9f9f9',
+                    }}
+                  >
+                    <td style={{ padding: '10px' }}>{record.date}</td>
+                    <td style={{ padding: '10px' }}>{record.startTime}</td>
+                    <td style={{ padding: '10px' }}>{record.endTime}</td>
+                    <td style={{ padding: '10px' }}>{record.hoursWorked}h</td>
+                    <td style={{ padding: '10px' }}>{record.restaurant}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
