@@ -1,12 +1,13 @@
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
-import { getTodayOrders, formatPrice, getStaff, verifyPin, getActiveWorkPeriod, getParkedOrders } from '../lib/pos-data';
+import { getTodayOrders, formatPrice, getStaff, verifyPin, getActiveWorkPeriod, getParkedOrders, getBusinessSettings, hasPermission } from '../lib/pos-data';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
 
 export default function PosHome() {
   const router = useRouter();
-  const [stats, setStats] = useState({ todayOrders: 0, todayRevenue: 0, activeOrders: 0, parkedOrders: 0 });
+  const [stats, setStats] = useState({ todayOrders: 0, todayRevenue: 0, activeOrders: 0, parkedOrders: 0, avgOrder: 0, itemsSold: 0 });
+  const [businessSettings, setBusinessSettings] = useState({ dailyGoal: 500 });
   const [currentTime, setCurrentTime] = useState('');
   const [showPinLogin, setShowPinLogin] = useState(false);
   const [pinInput, setPinInput] = useState('');
@@ -17,18 +18,24 @@ export default function PosHome() {
 
   useEffect(() => {
     const updateStats = async () => {
-      const [todayOrders, period, parked] = await Promise.all([
+      const [todayOrders, period, parked, bs] = await Promise.all([
         getTodayOrders(),
         getActiveWorkPeriod(),
         getParkedOrders(),
+        getBusinessSettings(),
       ]);
+      const validOrders = todayOrders.filter(o => o.status !== 'geannuleerd');
+      const revenue = validOrders.reduce((sum, o) => sum + o.total, 0);
       setStats({
-        todayOrders: todayOrders.length,
-        todayRevenue: todayOrders.filter(o => o.status !== 'geannuleerd').reduce((sum, o) => sum + o.total, 0),
+        todayOrders: validOrders.length,
+        todayRevenue: revenue,
         activeOrders: todayOrders.filter(o => o.status === 'nieuw' || o.status === 'bezig').length,
         parkedOrders: parked.length,
+        avgOrder: validOrders.length > 0 ? revenue / validOrders.length : 0,
+        itemsSold: validOrders.reduce((s, o) => s + (o.items || []).reduce((s2, i) => s2 + i.quantity, 0), 0),
       });
       setWorkPeriod(period && period.active ? period : null);
+      setBusinessSettings(bs);
     };
     updateStats();
     const interval = setInterval(updateStats, 10000);
@@ -124,9 +131,10 @@ export default function PosHome() {
     { title: 'Kassa', icon: '🧾', desc: 'Nieuwe bestelling opnemen', color: '#e74c3c', href: '/kassa', badge: stats.parkedOrders > 0 ? `${stats.parkedOrders} geparkeerd` : null },
     { title: 'Keuken', icon: '👨‍🍳', desc: 'Keuken display & orderstatus', color: '#f39c12', href: '/keuken', badge: stats.activeOrders > 0 ? `${stats.activeOrders} actief` : null },
     { title: 'Bestellingen', icon: '📊', desc: 'Rapporten & analytics', color: '#3498db', href: '/bestellingen' },
+    { title: 'Financieel', icon: '💰', desc: 'Omzet, kosten, BTW & audit', color: '#2ecc71', href: '/financieel' },
     { title: 'Menu Beheer', icon: '📋', desc: 'Producten, modifiers & koppelingen', color: '#27ae60', href: '/menubeheer' },
-    { title: 'Dagafsluiting', icon: '📑', desc: 'Werkperiode openen/sluiten', color: '#9b59b6', href: '/dagafsluiting' },
-    { title: 'Personeel', icon: '👥', desc: 'Medewerkers & PIN beheer', color: '#1abc9c', href: '/personeel' },
+    { title: 'Dagafsluiting', icon: '📑', desc: 'Z/X-rapport & kasboek', color: '#9b59b6', href: '/dagafsluiting' },
+    { title: 'Personeel', icon: '👥', desc: 'Inkloksysteem, uren & rechten', color: '#1abc9c', href: '/personeel' },
   ];
 
   return (
@@ -146,6 +154,16 @@ export default function PosHome() {
           <div style={styles.quickStat}>
             <span style={{ ...styles.quickStatValue, color: '#27ae60' }}>{formatPrice(stats.todayRevenue)}</span>
             <span style={styles.quickStatLabel}>Omzet</span>
+            {businessSettings.dailyGoal > 0 && (
+              <div style={{ width: '60px', height: '3px', background: 'rgba(255,255,255,0.1)', borderRadius: '2px', marginTop: '4px' }}>
+                <div style={{ height: '3px', borderRadius: '2px', background: stats.todayRevenue >= businessSettings.dailyGoal ? '#3fb950' : '#f0883e', width: `${Math.min((stats.todayRevenue / businessSettings.dailyGoal) * 100, 100)}%` }} />
+              </div>
+            )}
+          </div>
+          <div style={styles.quickStatDivider} />
+          <div style={styles.quickStat}>
+            <span style={{ ...styles.quickStatValue, color: '#f0883e' }}>{formatPrice(stats.avgOrder)}</span>
+            <span style={styles.quickStatLabel}>Gem. Bon</span>
           </div>
           <div style={styles.quickStatDivider} />
           <div style={styles.quickStat}>
@@ -199,7 +217,7 @@ export default function PosHome() {
 
       {/* Footer */}
       <div style={styles.footer}>
-        <span>FastFood POS v2.0</span>
+        <span>FastFood POS v3.0</span>
         {!currentStaff && (
           <button onClick={() => { setPinTarget(null); setPinInput(''); setPinError(''); setShowPinLogin(true); }} style={styles.loginBtn}>
             🔐 PIN Login
