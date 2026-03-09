@@ -3,131 +3,11 @@ import { useRouter } from 'next/router';
 import {
   getCategories,
   getMenuItems,
+  getCustomizationOptions,
   saveOrder,
   getNextOrderNumber,
   formatPrice,
 } from '../lib/pos-data';
-
-// Customization options per category
-const CUSTOMIZATION_OPTIONS = {
-  burgers: [
-    {
-      name: 'Saus',
-      type: 'single',
-      options: [
-        { name: 'Geen saus', price: 0 },
-        { name: 'Mayonaise', price: 0 },
-        { name: 'Ketchup', price: 0 },
-        { name: 'Curry', price: 0 },
-        { name: 'Joppiesaus', price: 0 },
-        { name: 'Sambal', price: 0 },
-        { name: 'Knoflooksaus', price: 0 },
-        { name: 'BBQ Saus', price: 0 },
-      ]
-    },
-    {
-      name: 'Groenten',
-      type: 'multi',
-      defaultSelected: ['Sla', 'Tomaat', 'Ui', 'Augurk'],
-      options: [
-        { name: 'Sla', price: 0 },
-        { name: 'Tomaat', price: 0 },
-        { name: 'Ui', price: 0 },
-        { name: 'Augurk', price: 0 },
-        { name: 'Jalapeno', price: 0 },
-      ]
-    },
-    {
-      name: "Extra's",
-      type: 'multi',
-      options: [
-        { name: 'Extra Kaas', price: 0.75 },
-        { name: 'Extra Bacon', price: 1.00 },
-        { name: 'Extra Saus', price: 0.50 },
-      ]
-    }
-  ],
-  chicken: [
-    {
-      name: 'Saus',
-      type: 'single',
-      options: [
-        { name: 'Geen saus', price: 0 },
-        { name: 'Mayonaise', price: 0 },
-        { name: 'Ketchup', price: 0 },
-        { name: 'Curry', price: 0 },
-        { name: 'BBQ Saus', price: 0 },
-        { name: 'Sweet Chili', price: 0 },
-        { name: 'Knoflooksaus', price: 0 },
-      ]
-    },
-  ],
-  fries: [
-    {
-      name: 'Saus',
-      type: 'single',
-      options: [
-        { name: 'Geen saus', price: 0 },
-        { name: 'Mayonaise', price: 0.50 },
-        { name: 'Ketchup', price: 0.50 },
-        { name: 'Curry', price: 0.50 },
-        { name: 'Joppiesaus', price: 0.50 },
-        { name: 'Sambal', price: 0.50 },
-        { name: 'Knoflooksaus', price: 0.50 },
-        { name: 'BBQ Saus', price: 0.50 },
-        { name: 'Speciaal', price: 1.00 },
-      ]
-    },
-  ],
-  menu: [
-    {
-      name: 'Saus Burger',
-      type: 'single',
-      options: [
-        { name: 'Geen saus', price: 0 },
-        { name: 'Mayonaise', price: 0 },
-        { name: 'Ketchup', price: 0 },
-        { name: 'Curry', price: 0 },
-        { name: 'Joppiesaus', price: 0 },
-        { name: 'BBQ Saus', price: 0 },
-      ]
-    },
-    {
-      name: 'Groenten',
-      type: 'multi',
-      defaultSelected: ['Sla', 'Tomaat', 'Ui', 'Augurk'],
-      options: [
-        { name: 'Sla', price: 0 },
-        { name: 'Tomaat', price: 0 },
-        { name: 'Ui', price: 0 },
-        { name: 'Augurk', price: 0 },
-      ]
-    },
-    {
-      name: 'Drank',
-      type: 'single',
-      options: [
-        { name: 'Cola', price: 0 },
-        { name: 'Cola Zero', price: 0 },
-        { name: 'Fanta', price: 0 },
-        { name: 'Sprite', price: 0 },
-        { name: 'Ice Tea', price: 0 },
-        { name: 'Water', price: 0 },
-      ]
-    },
-    {
-      name: 'Saus Patat',
-      type: 'single',
-      options: [
-        { name: 'Geen saus', price: 0 },
-        { name: 'Mayonaise', price: 0 },
-        { name: 'Ketchup', price: 0 },
-        { name: 'Curry', price: 0 },
-        { name: 'Speciaal', price: 0 },
-      ]
-    },
-  ],
-};
 
 // Category colors for the grid buttons (Lightspeed style)
 const CATEGORY_COLORS = {
@@ -153,11 +33,15 @@ export default function Kassa() {
   const [orderType, setOrderType] = useState('afhalen');
   const [searchQuery, setSearchQuery] = useState('');
   const [processing, setProcessing] = useState(false);
+  const [customizationOptions, setCustomizationOptions] = useState({});
 
   // Customization modal state
   const [showCustomization, setShowCustomization] = useState(false);
   const [customizingItem, setCustomizingItem] = useState(null);
   const [customSelections, setCustomSelections] = useState({});
+
+  // Variation selection state
+  const [selectedVariation, setSelectedVariation] = useState(null);
 
   // Cash payment state
   const [showCashInput, setShowCashInput] = useState(false);
@@ -165,9 +49,14 @@ export default function Kassa() {
 
   useEffect(() => {
     async function loadData() {
-      const [cats, items] = await Promise.all([getCategories(), getMenuItems()]);
+      const [cats, items, customs] = await Promise.all([
+        getCategories(),
+        getMenuItems(),
+        getCustomizationOptions(),
+      ]);
       setCategories(cats);
       setMenuItems(items);
+      setCustomizationOptions(customs);
     }
     loadData();
   }, []);
@@ -181,17 +70,25 @@ export default function Kassa() {
   });
 
   const hasCustomization = (item) => {
-    return CUSTOMIZATION_OPTIONS[item.category] && CUSTOMIZATION_OPTIONS[item.category].length > 0;
+    const hasOptions = customizationOptions[item.category] && customizationOptions[item.category].length > 0;
+    const hasVariations = item.variations && item.variations.length > 0;
+    return hasOptions || hasVariations;
   };
 
   const handleProductClick = useCallback((item) => {
     if (hasCustomization(item)) {
       setCustomizingItem(item);
-      const groups = CUSTOMIZATION_OPTIONS[item.category];
+      // Set default variation
+      if (item.variations && item.variations.length > 0) {
+        setSelectedVariation(item.variations[0]);
+      } else {
+        setSelectedVariation(null);
+      }
+      const groups = customizationOptions[item.category] || [];
       const defaults = {};
       groups.forEach(group => {
         if (group.type === 'single') {
-          defaults[group.name] = group.options[0].name;
+          defaults[group.name] = group.options[0]?.name || '';
         } else if (group.type === 'multi') {
           defaults[group.name] = group.defaultSelected ? [...group.defaultSelected] : [];
         }
@@ -199,27 +96,30 @@ export default function Kassa() {
       setCustomSelections(defaults);
       setShowCustomization(true);
     } else {
-      addToCart(item, null);
+      addToCart(item, null, null);
     }
-  }, [menuItems]);
+  }, [menuItems, customizationOptions]);
 
-  const addToCart = useCallback((item, customizations) => {
+  const addToCart = useCallback((item, customizations, variation) => {
     setCart(prev => {
-      if (!customizations) {
+      if (!customizations && !variation) {
         // No customizations - merge by product id
-        const existing = prev.find(c => c.id === item.id && !c.customizations);
+        const existing = prev.find(c => c.id === item.id && !c.customizations && !c.variation);
         if (existing) {
           return prev.map(c => c.cartId === existing.cartId ? { ...c, quantity: c.quantity + 1 } : c);
         }
-        return [...prev, { ...item, cartId: `${item.id}-plain`, quantity: 1, customizations: null, extraPrice: 0 }];
+        return [...prev, { ...item, cartId: `${item.id}-plain`, quantity: 1, customizations: null, variation: null, extraPrice: 0 }];
       } else {
-        // With customizations - always new entry
+        // With customizations/variation - always new entry
         const extraPrice = calculateExtraPrice(item.category, customizations);
+        const itemPrice = variation ? variation.price : item.price;
         return [...prev, {
           ...item,
+          price: itemPrice,
           cartId: `${item.id}-${Date.now()}`,
           quantity: 1,
           customizations,
+          variation: variation ? variation.name : null,
           extraPrice,
         }];
       }
@@ -227,9 +127,9 @@ export default function Kassa() {
   }, []);
 
   const calculateExtraPrice = (category, customizations) => {
-    if (!customizations || !CUSTOMIZATION_OPTIONS[category]) return 0;
+    if (!customizations || !customizationOptions[category]) return 0;
     let extra = 0;
-    CUSTOMIZATION_OPTIONS[category].forEach(group => {
+    customizationOptions[category].forEach(group => {
       if (group.type === 'single') {
         const selected = group.options.find(o => o.name === customizations[group.name]);
         if (selected) extra += selected.price;
@@ -246,9 +146,10 @@ export default function Kassa() {
 
   const confirmCustomization = () => {
     if (customizingItem) {
-      addToCart(customizingItem, { ...customSelections });
+      addToCart(customizingItem, { ...customSelections }, selectedVariation);
       setShowCustomization(false);
       setCustomizingItem(null);
+      setSelectedVariation(null);
     }
   };
 
@@ -291,6 +192,8 @@ export default function Kassa() {
           extraPrice: c.extraPrice || 0,
           quantity: c.quantity,
           customizations: c.customizations || null,
+          variation: c.variation || null,
+          category: c.category,
         })),
         subtotal,
         btw,
@@ -341,7 +244,7 @@ export default function Kassa() {
   const getCustomizationSummary = (customizations, category) => {
     if (!customizations) return null;
     const parts = [];
-    const groups = CUSTOMIZATION_OPTIONS[category] || [];
+    const groups = customizationOptions[category] || [];
     groups.forEach(group => {
       const val = customizations[group.name];
       if (!val) return;
@@ -424,7 +327,10 @@ export default function Kassa() {
                       <button onClick={() => updateQuantity(item.cartId, 1)} style={styles.qtyBtnSmall}>+</button>
                     </div>
                     <div style={styles.orderItemDetails}>
-                      <div style={styles.orderItemName}>{item.name}</div>
+                      <div style={styles.orderItemName}>
+                        {item.name}
+                        {item.variation && <span style={{ color: '#f0883e', fontWeight: '400' }}> ({item.variation})</span>}
+                      </div>
                       {summary && (
                         <div style={styles.orderItemCustom}>{summary}</div>
                       )}
@@ -571,7 +477,33 @@ export default function Kassa() {
             </div>
 
             <div style={styles.customBody}>
-              {CUSTOMIZATION_OPTIONS[customizingItem.category]?.map(group => (
+              {/* Variation selector */}
+              {customizingItem.variations && customizingItem.variations.length > 0 && (
+                <div style={styles.customGroup}>
+                  <h3 style={styles.customGroupTitle}>
+                    Grootte
+                    <span style={styles.customGroupType}>(kies 1)</span>
+                  </h3>
+                  <div style={styles.customOptions}>
+                    {customizingItem.variations.map(v => (
+                      <button
+                        key={v.name}
+                        style={{
+                          ...styles.customOptionBtn,
+                          background: selectedVariation?.name === v.name ? '#27ae60' : 'rgba(255,255,255,0.08)',
+                          borderColor: selectedVariation?.name === v.name ? '#27ae60' : 'rgba(255,255,255,0.15)',
+                          color: selectedVariation?.name === v.name ? '#fff' : '#ccc',
+                        }}
+                        onClick={() => setSelectedVariation(v)}
+                      >
+                        <span>{v.name}</span>
+                        <span style={styles.optionPrice}>{formatPrice(v.price)}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {customizationOptions[customizingItem.category]?.map(group => (
                 <div key={group.name} style={styles.customGroup}>
                   <h3 style={styles.customGroupTitle}>
                     {group.name}
@@ -624,7 +556,7 @@ export default function Kassa() {
                 Annuleren
               </button>
               <button onClick={confirmCustomization} style={styles.customAddBtn}>
-                Toevoegen — {formatPrice(customizingItem.price + calculateExtraPrice(customizingItem.category, customSelections))}
+                Toevoegen — {formatPrice((selectedVariation ? selectedVariation.price : customizingItem.price) + calculateExtraPrice(customizingItem.category, customSelections))}
               </button>
             </div>
           </div>
@@ -758,26 +690,21 @@ export default function Kassa() {
 
               <div style={styles.receiptDivider} />
 
-              {lastOrder.items.map((item, i) => (
-                <div key={i}>
-                  <div style={styles.receiptItem}>
-                    <span>{item.quantity}x {item.name}</span>
-                    <span>{formatPrice((item.price + (item.extraPrice || 0)) * item.quantity)}</span>
-                  </div>
-                  {item.customizations && (
-                    <div style={styles.receiptCustom}>
-                      {getCustomizationSummary(item.customizations, item.category || '') || ''}
-                      {/* Show category from the original menu items */}
-                      {(() => {
-                        const menuItem = menuItems.find(m => m.id === item.id);
-                        if (!menuItem) return null;
-                        const summary = getCustomizationSummary(item.customizations, menuItem.category);
-                        return summary ? summary : null;
-                      })()}
+              {lastOrder.items.map((item, i) => {
+                const cat = item.category || (menuItems.find(m => m.id === item.id)?.category) || '';
+                const summary = item.customizations ? getCustomizationSummary(item.customizations, cat) : null;
+                return (
+                  <div key={i}>
+                    <div style={styles.receiptItem}>
+                      <span>{item.quantity}x {item.name}{item.variation ? ` (${item.variation})` : ''}</span>
+                      <span>{formatPrice((item.price + (item.extraPrice || 0)) * item.quantity)}</span>
                     </div>
-                  )}
-                </div>
-              ))}
+                    {summary && (
+                      <div style={styles.receiptCustom}>{summary}</div>
+                    )}
+                  </div>
+                );
+              })}
 
               <div style={styles.receiptDivider} />
 
