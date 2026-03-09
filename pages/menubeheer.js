@@ -5,8 +5,10 @@ import {
   getMenuItems,
   saveMenuItems,
   saveCategories,
-  getCustomizationOptions,
-  saveCustomizationOptions,
+  getModifierGroups,
+  saveModifierGroups,
+  getModifierLinks,
+  saveModifierLinks,
   formatPrice,
 } from '../lib/pos-data';
 
@@ -15,7 +17,8 @@ export default function MenuBeheer() {
   const [activeTab, setActiveTab] = useState('products');
   const [categories, setCategories] = useState([]);
   const [menuItems, setMenuItems] = useState([]);
-  const [customOptions, setCustomOptions] = useState({});
+  const [modifierGroups, setModifierGroups] = useState([]);
+  const [modifierLinks, setModifierLinks] = useState([]);
   const [activeCategory, setActiveCategory] = useState('burgers');
   const [saving, setSaving] = useState(false);
 
@@ -29,21 +32,27 @@ export default function MenuBeheer() {
   const [editingCategory, setEditingCategory] = useState(null);
   const [categoryForm, setCategoryForm] = useState({ id: '', name: '', icon: '', color: '#e74c3c' });
 
-  // Customization form state
+  // Modifier group form state
   const [showGroupForm, setShowGroupForm] = useState(false);
   const [editingGroup, setEditingGroup] = useState(null);
   const [groupForm, setGroupForm] = useState({ name: '', type: 'single', options: [{ name: '', price: 0 }], defaultSelected: [] });
 
+  // Link form state
+  const [showLinkForm, setShowLinkForm] = useState(false);
+  const [linkForm, setLinkForm] = useState({ groupId: '', targetType: 'category', targetId: '' });
+
   useEffect(() => {
     async function loadData() {
-      const [cats, items, customs] = await Promise.all([
+      const [cats, items, groups, links] = await Promise.all([
         getCategories(),
         getMenuItems(),
-        getCustomizationOptions(),
+        getModifierGroups(),
+        getModifierLinks(),
       ]);
       setCategories(cats);
       setMenuItems(items);
-      setCustomOptions(customs);
+      setModifierGroups(groups);
+      setModifierLinks(links);
     }
     loadData();
   }, []);
@@ -112,6 +121,12 @@ export default function MenuBeheer() {
     const updated = menuItems.filter(i => i.id !== id);
     await saveMenuItems(updated);
     setMenuItems(updated);
+    // Also remove product-level modifier links
+    const updatedLinks = modifierLinks.filter(l => !(l.targetType === 'product' && String(l.targetId) === String(id)));
+    if (updatedLinks.length !== modifierLinks.length) {
+      await saveModifierLinks(updatedLinks);
+      setModifierLinks(updatedLinks);
+    }
   };
 
   const toggleAvailable = async (id) => {
@@ -120,7 +135,6 @@ export default function MenuBeheer() {
     setMenuItems(updated);
   };
 
-  // Variation helpers
   const addVariation = () => {
     setProductForm(prev => ({ ...prev, variations: [...prev.variations, { name: '', price: '' }] }));
   };
@@ -193,30 +207,29 @@ export default function MenuBeheer() {
     const updated = categories.filter(c => c.id !== catId);
     await saveCategories(updated);
     setCategories(updated);
-    // Also remove customization options for this category
-    const updatedCustom = { ...customOptions };
-    delete updatedCustom[catId];
-    await saveCustomizationOptions(updatedCustom);
-    setCustomOptions(updatedCustom);
+    // Remove category-level modifier links
+    const updatedLinks = modifierLinks.filter(l => !(l.targetType === 'category' && l.targetId === catId));
+    if (updatedLinks.length !== modifierLinks.length) {
+      await saveModifierLinks(updatedLinks);
+      setModifierLinks(updatedLinks);
+    }
   };
 
-  // ===== CUSTOMIZATION FUNCTIONS =====
-  const currentGroups = customOptions[activeCategory] || [];
-
+  // ===== MODIFIER GROUP FUNCTIONS =====
   const openAddGroup = () => {
     setGroupForm({ name: '', type: 'single', options: [{ name: '', price: 0 }], defaultSelected: [] });
     setEditingGroup(null);
     setShowGroupForm(true);
   };
 
-  const openEditGroup = (group, idx) => {
+  const openEditGroup = (group) => {
     setGroupForm({
       name: group.name,
       type: group.type,
       options: group.options.length > 0 ? group.options.map(o => ({ ...o })) : [{ name: '', price: 0 }],
       defaultSelected: group.defaultSelected || [],
     });
-    setEditingGroup(idx);
+    setEditingGroup(group);
     setShowGroupForm(true);
   };
 
@@ -236,6 +249,7 @@ export default function MenuBeheer() {
       }
 
       const group = {
+        id: editingGroup ? editingGroup.id : `mg_${Date.now()}`,
         name: groupForm.name.trim(),
         type: groupForm.type,
         options,
@@ -244,16 +258,15 @@ export default function MenuBeheer() {
         group.defaultSelected = groupForm.defaultSelected.filter(d => options.some(o => o.name === d));
       }
 
-      const groups = [...currentGroups];
-      if (editingGroup !== null) {
-        groups[editingGroup] = group;
+      let updated;
+      if (editingGroup) {
+        updated = modifierGroups.map(g => g.id === editingGroup.id ? group : g);
       } else {
-        groups.push(group);
+        updated = [...modifierGroups, group];
       }
 
-      const updated = { ...customOptions, [activeCategory]: groups };
-      await saveCustomizationOptions(updated);
-      setCustomOptions(updated);
+      await saveModifierGroups(updated);
+      setModifierGroups(updated);
       setShowGroupForm(false);
     } catch (err) {
       alert('Fout bij opslaan.');
@@ -262,15 +275,25 @@ export default function MenuBeheer() {
     }
   };
 
-  const deleteGroup = async (idx) => {
-    if (!confirm('Aanpassingsgroep verwijderen?')) return;
-    const groups = currentGroups.filter((_, i) => i !== idx);
-    const updated = { ...customOptions, [activeCategory]: groups };
-    await saveCustomizationOptions(updated);
-    setCustomOptions(updated);
+  const deleteGroup = async (groupId) => {
+    const linkCount = modifierLinks.filter(l => l.groupId === groupId).length;
+    const msg = linkCount > 0
+      ? `Deze groep is gelinkt aan ${linkCount} categorie(en)/product(en). Verwijderen?`
+      : 'Modifier groep verwijderen?';
+    if (!confirm(msg)) return;
+
+    const updatedGroups = modifierGroups.filter(g => g.id !== groupId);
+    await saveModifierGroups(updatedGroups);
+    setModifierGroups(updatedGroups);
+
+    // Remove all links for this group
+    const updatedLinks = modifierLinks.filter(l => l.groupId !== groupId);
+    if (updatedLinks.length !== modifierLinks.length) {
+      await saveModifierLinks(updatedLinks);
+      setModifierLinks(updatedLinks);
+    }
   };
 
-  // Group form helpers
   const addGroupOption = () => {
     setGroupForm(prev => ({ ...prev, options: [...prev.options, { name: '', price: 0 }] }));
   };
@@ -290,10 +313,69 @@ export default function MenuBeheer() {
     });
   };
 
+  // ===== LINK FUNCTIONS =====
+  const getLinksForGroup = (groupId) => modifierLinks.filter(l => l.groupId === groupId);
+
+  const getTargetName = (link) => {
+    if (link.targetType === 'category') {
+      const cat = categories.find(c => c.id === link.targetId);
+      return cat ? `${cat.icon} ${cat.name}` : link.targetId;
+    }
+    const item = menuItems.find(i => String(i.id) === String(link.targetId));
+    return item ? item.name : `Product #${link.targetId}`;
+  };
+
+  const openAddLink = (groupId) => {
+    setLinkForm({ groupId, targetType: 'category', targetId: categories[0]?.id || '' });
+    setShowLinkForm(true);
+  };
+
+  const saveLink = async () => {
+    if (!linkForm.groupId || !linkForm.targetId) return;
+    // Check duplicate
+    const exists = modifierLinks.some(
+      l => l.groupId === linkForm.groupId && l.targetType === linkForm.targetType && String(l.targetId) === String(linkForm.targetId)
+    );
+    if (exists) {
+      alert('Deze koppeling bestaat al.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const maxSort = modifierLinks
+        .filter(l => l.targetType === linkForm.targetType && String(l.targetId) === String(linkForm.targetId))
+        .reduce((max, l) => Math.max(max, l.sortOrder || 0), -1);
+
+      const newLink = {
+        groupId: linkForm.groupId,
+        targetType: linkForm.targetType,
+        targetId: linkForm.targetType === 'product' ? Number(linkForm.targetId) : linkForm.targetId,
+        sortOrder: maxSort + 1,
+      };
+      const updated = [...modifierLinks, newLink];
+      await saveModifierLinks(updated);
+      setModifierLinks(updated);
+      setShowLinkForm(false);
+    } catch (err) {
+      alert('Fout bij opslaan.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteLink = async (groupId, targetType, targetId) => {
+    const updated = modifierLinks.filter(
+      l => !(l.groupId === groupId && l.targetType === targetType && String(l.targetId) === String(targetId))
+    );
+    await saveModifierLinks(updated);
+    setModifierLinks(updated);
+  };
+
   const tabs = [
     { id: 'products', label: 'Producten', icon: '🛍' },
     { id: 'categories', label: 'Categorieen', icon: '📂' },
-    { id: 'customizations', label: 'Aanpassingen', icon: '⚙️' },
+    { id: 'modifiers', label: 'Modifier Groepen', icon: '⚙️' },
+    { id: 'links', label: 'Koppelingen', icon: '🔗' },
   ];
 
   return (
@@ -345,26 +427,34 @@ export default function MenuBeheer() {
                 <button onClick={openAddProduct} style={s.addBtn}>+ Nieuw Product</button>
               </div>
               <div style={s.list}>
-                {filteredItems.map(item => (
-                  <div key={item.id} style={{ ...s.row, opacity: item.available ? 1 : 0.5 }}>
-                    <div style={s.rowInfo}>
-                      <div style={s.rowName}>{item.name}</div>
-                      <div style={s.rowPrice}>{formatPrice(item.price)}</div>
-                      {item.variations && item.variations.length > 0 && (
-                        <div style={s.rowVariations}>
-                          {item.variations.map(v => `${v.name}: ${formatPrice(v.price)}`).join(' · ')}
-                        </div>
-                      )}
+                {filteredItems.map(item => {
+                  const itemLinks = modifierLinks.filter(l => l.targetType === 'product' && String(l.targetId) === String(item.id));
+                  return (
+                    <div key={item.id} style={{ ...s.row, opacity: item.available ? 1 : 0.5 }}>
+                      <div style={s.rowInfo}>
+                        <div style={s.rowName}>{item.name}</div>
+                        <div style={s.rowPrice}>{formatPrice(item.price)}</div>
+                        {item.variations && item.variations.length > 0 && (
+                          <div style={s.rowVariations}>
+                            {item.variations.map(v => `${v.name}: ${formatPrice(v.price)}`).join(' · ')}
+                          </div>
+                        )}
+                        {itemLinks.length > 0 && (
+                          <div style={s.rowVariations}>
+                            🔗 {itemLinks.map(l => modifierGroups.find(g => g.id === l.groupId)?.name || l.groupId).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                      <div style={s.rowActions}>
+                        <button onClick={() => toggleAvailable(item.id)} style={{ ...s.toggleBtn, background: item.available ? '#27ae60' : '#e74c3c' }}>
+                          {item.available ? 'Beschikbaar' : 'Uitverkocht'}
+                        </button>
+                        <button onClick={() => openEditProduct(item)} style={s.editBtn}>Bewerken</button>
+                        <button onClick={() => deleteProduct(item.id)} style={s.delBtn}>×</button>
+                      </div>
                     </div>
-                    <div style={s.rowActions}>
-                      <button onClick={() => toggleAvailable(item.id)} style={{ ...s.toggleBtn, background: item.available ? '#27ae60' : '#e74c3c' }}>
-                        {item.available ? 'Beschikbaar' : 'Uitverkocht'}
-                      </button>
-                      <button onClick={() => openEditProduct(item)} style={s.editBtn}>Bewerken</button>
-                      <button onClick={() => deleteProduct(item.id)} style={s.delBtn}>×</button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
                 {filteredItems.length === 0 && <div style={s.empty}>Geen producten in deze categorie</div>}
               </div>
             </div>
@@ -379,67 +469,78 @@ export default function MenuBeheer() {
               <button onClick={openAddCategory} style={s.addBtn}>+ Nieuwe Categorie</button>
             </div>
             <div style={s.list}>
-              {categories.map(cat => (
-                <div key={cat.id} style={s.row}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1 }}>
-                    <span style={{ fontSize: '28px' }}>{cat.icon}</span>
-                    <div>
-                      <div style={s.rowName}>{cat.name}</div>
-                      <div style={{ fontSize: '12px', color: '#999' }}>ID: {cat.id} · {menuItems.filter(i => i.category === cat.id).length} producten</div>
+              {categories.map(cat => {
+                const catLinks = modifierLinks.filter(l => l.targetType === 'category' && l.targetId === cat.id);
+                return (
+                  <div key={cat.id} style={s.row}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '28px' }}>{cat.icon}</span>
+                      <div>
+                        <div style={s.rowName}>{cat.name}</div>
+                        <div style={{ fontSize: '12px', color: '#999' }}>
+                          ID: {cat.id} · {menuItems.filter(i => i.category === cat.id).length} producten
+                        </div>
+                        {catLinks.length > 0 && (
+                          <div style={{ fontSize: '11px', color: '#3498db', marginTop: '2px' }}>
+                            🔗 {catLinks.map(l => modifierGroups.find(g => g.id === l.groupId)?.name || l.groupId).join(', ')}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: cat.color, marginLeft: '8px' }} />
                     </div>
-                    <div style={{ width: '24px', height: '24px', borderRadius: '50%', background: cat.color, marginLeft: '8px' }} />
+                    <div style={s.rowActions}>
+                      <button onClick={() => openEditCategory(cat)} style={s.editBtn}>Bewerken</button>
+                      <button onClick={() => deleteCategory(cat.id)} style={s.delBtn}>×</button>
+                    </div>
                   </div>
-                  <div style={s.rowActions}>
-                    <button onClick={() => openEditCategory(cat)} style={s.editBtn}>Bewerken</button>
-                    <button onClick={() => deleteCategory(cat.id)} style={s.delBtn}>×</button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* ===== CUSTOMIZATIONS TAB ===== */}
-        {activeTab === 'customizations' && (
-          <>
-            <div style={s.sidebar}>
-              <h3 style={s.sidebarTitle}>Categorie</h3>
-              {categories.map(cat => (
-                <button
-                  key={cat.id}
-                  onClick={() => setActiveCategory(cat.id)}
-                  style={{
-                    ...s.sidebarBtn,
-                    ...(activeCategory === cat.id ? { background: cat.color + '15', borderLeft: `3px solid ${cat.color}`, color: cat.color } : {}),
-                  }}
-                >
-                  <span>{cat.icon}</span>
-                  <span style={{ flex: 1 }}>{cat.name}</span>
-                  <span style={s.badge}>{(customOptions[cat.id] || []).length}</span>
-                </button>
-              ))}
-            </div>
-            <div style={s.main}>
-              <div style={s.mainHeader}>
-                <h2 style={s.mainTitle}>
-                  Aanpassingen: {categories.find(c => c.id === activeCategory)?.name || activeCategory}
-                </h2>
-                <button onClick={openAddGroup} style={s.addBtn}>+ Nieuwe Groep</button>
+        {/* ===== MODIFIER GROUPS TAB ===== */}
+        {activeTab === 'modifiers' && (
+          <div style={{ ...s.main, flex: 1 }}>
+            <div style={s.mainHeader}>
+              <div>
+                <h2 style={s.mainTitle}>Modifier Groepen</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#999' }}>
+                  Maak onafhankelijke groepen aan en koppel ze via het Koppelingen tabblad
+                </p>
               </div>
-              <div style={s.list}>
-                {currentGroups.length === 0 && (
-                  <div style={s.empty}>Geen aanpassingen voor deze categorie. Voeg een groep toe (bijv. Saus, Groenten, Extra's).</div>
-                )}
-                {currentGroups.map((group, gIdx) => (
-                  <div key={gIdx} style={s.groupCard}>
+              <button onClick={openAddGroup} style={s.addBtn}>+ Nieuwe Groep</button>
+            </div>
+            <div style={s.list}>
+              {modifierGroups.length === 0 && (
+                <div style={s.empty}>Geen modifier groepen. Maak een groep aan (bijv. Saus, Groenten, Extra's).</div>
+              )}
+              {modifierGroups.map(group => {
+                const links = getLinksForGroup(group.id);
+                return (
+                  <div key={group.id} style={s.groupCard}>
                     <div style={s.groupHeader}>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <span style={s.groupName}>{group.name}</span>
                         <span style={s.groupType}>{group.type === 'single' ? 'Kies 1' : 'Meerdere'}</span>
+                        <div style={{ fontSize: '11px', color: '#999', marginTop: '4px' }}>
+                          ID: {group.id}
+                          {links.length > 0 && (
+                            <span style={{ color: '#3498db', marginLeft: '10px' }}>
+                              🔗 Gelinkt aan {links.length} {links.length === 1 ? 'doel' : 'doelen'}:
+                              {' '}{links.map(l => getTargetName(l)).join(', ')}
+                            </span>
+                          )}
+                          {links.length === 0 && (
+                            <span style={{ color: '#e67e22', marginLeft: '10px' }}>
+                              ⚠️ Niet gelinkt
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <div style={{ display: 'flex', gap: '6px' }}>
-                        <button onClick={() => openEditGroup(group, gIdx)} style={s.editBtn}>Bewerken</button>
-                        <button onClick={() => deleteGroup(gIdx)} style={s.delBtn}>×</button>
+                        <button onClick={() => openEditGroup(group)} style={s.editBtn}>Bewerken</button>
+                        <button onClick={() => deleteGroup(group.id)} style={s.delBtn}>×</button>
                       </div>
                     </div>
                     <div style={s.groupOptions}>
@@ -454,10 +555,72 @@ export default function MenuBeheer() {
                       ))}
                     </div>
                   </div>
-                ))}
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ===== LINKS TAB ===== */}
+        {activeTab === 'links' && (
+          <div style={{ ...s.main, flex: 1 }}>
+            <div style={s.mainHeader}>
+              <div>
+                <h2 style={s.mainTitle}>Koppelingen</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#999' }}>
+                  Link modifier groepen aan categorieen of individuele producten
+                </p>
               </div>
             </div>
-          </>
+            <div style={s.list}>
+              {modifierGroups.length === 0 && (
+                <div style={s.empty}>Maak eerst modifier groepen aan in het vorige tabblad.</div>
+              )}
+              {modifierGroups.map(group => {
+                const links = getLinksForGroup(group.id);
+                return (
+                  <div key={group.id} style={s.linkCard}>
+                    <div style={s.linkCardHeader}>
+                      <div>
+                        <span style={s.groupName}>{group.name}</span>
+                        <span style={s.groupType}>{group.type === 'single' ? 'Kies 1' : 'Meerdere'}</span>
+                        <span style={{ fontSize: '11px', color: '#999', marginLeft: '8px' }}>
+                          ({group.options.length} opties)
+                        </span>
+                      </div>
+                      <button onClick={() => openAddLink(group.id)} style={s.linkAddBtn}>+ Koppeling</button>
+                    </div>
+                    {links.length === 0 ? (
+                      <div style={{ padding: '12px 16px', fontSize: '13px', color: '#999', fontStyle: 'italic' }}>
+                        Niet gekoppeld — klik "+ Koppeling" om te linken aan een categorie of product
+                      </div>
+                    ) : (
+                      <div style={s.linksList}>
+                        {links.map((link, idx) => (
+                          <div key={idx} style={s.linkRow}>
+                            <span style={{
+                              ...s.linkTypeBadge,
+                              background: link.targetType === 'category' ? '#3498db20' : '#e67e2220',
+                              color: link.targetType === 'category' ? '#3498db' : '#e67e22',
+                            }}>
+                              {link.targetType === 'category' ? '📂 Categorie' : '🛍 Product'}
+                            </span>
+                            <span style={s.linkTarget}>{getTargetName(link)}</span>
+                            <button
+                              onClick={() => deleteLink(link.groupId, link.targetType, link.targetId)}
+                              style={s.linkDelBtn}
+                            >
+                              Ontkoppelen
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         )}
       </div>
 
@@ -512,7 +675,7 @@ export default function MenuBeheer() {
               </label>
             </div>
 
-            {/* Variations Section */}
+            {/* Variations */}
             <div style={s.formGroup}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                 <label style={s.label}>Variaties (optioneel)</label>
@@ -604,11 +767,11 @@ export default function MenuBeheer() {
         </div>
       )}
 
-      {/* ===== CUSTOMIZATION GROUP FORM MODAL ===== */}
+      {/* ===== MODIFIER GROUP FORM MODAL ===== */}
       {showGroupForm && (
         <div style={s.overlay} onClick={() => setShowGroupForm(false)}>
           <div style={{ ...s.modal, maxHeight: '85vh', overflow: 'auto' }} onClick={e => e.stopPropagation()}>
-            <h2 style={s.modalTitle}>{editingGroup !== null ? 'Groep Bewerken' : 'Nieuwe Aanpassingsgroep'}</h2>
+            <h2 style={s.modalTitle}>{editingGroup ? 'Modifier Groep Bewerken' : 'Nieuwe Modifier Groep'}</h2>
             <div style={s.formGroup}>
               <label style={s.label}>Groepsnaam</label>
               <input
@@ -616,7 +779,7 @@ export default function MenuBeheer() {
                 value={groupForm.name}
                 onChange={e => setGroupForm({ ...groupForm, name: e.target.value })}
                 style={s.input}
-                placeholder="bijv. Saus, Groenten, Extra's"
+                placeholder="bijv. Burger Saus, Groenten, Extra's"
                 autoFocus
               />
             </div>
@@ -679,7 +842,64 @@ export default function MenuBeheer() {
             <div style={s.formActions}>
               <button onClick={() => setShowGroupForm(false)} style={s.cancelBtn}>Annuleren</button>
               <button onClick={saveGroup} style={s.saveBtn} disabled={saving}>
-                {saving ? 'Opslaan...' : (editingGroup !== null ? 'Opslaan' : 'Toevoegen')}
+                {saving ? 'Opslaan...' : (editingGroup ? 'Opslaan' : 'Toevoegen')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== LINK FORM MODAL ===== */}
+      {showLinkForm && (
+        <div style={s.overlay} onClick={() => setShowLinkForm(false)}>
+          <div style={s.modal} onClick={e => e.stopPropagation()}>
+            <h2 style={s.modalTitle}>Nieuwe Koppeling</h2>
+            <p style={{ margin: '0 0 16px', fontSize: '13px', color: '#666' }}>
+              Link "{modifierGroups.find(g => g.id === linkForm.groupId)?.name}" aan:
+            </p>
+            <div style={s.formGroup}>
+              <label style={s.label}>Type</label>
+              <select
+                value={linkForm.targetType}
+                onChange={e => {
+                  const type = e.target.value;
+                  setLinkForm({
+                    ...linkForm,
+                    targetType: type,
+                    targetId: type === 'category' ? (categories[0]?.id || '') : (menuItems[0]?.id || ''),
+                  });
+                }}
+                style={s.input}
+              >
+                <option value="category">Categorie (alle producten in categorie)</option>
+                <option value="product">Specifiek Product</option>
+              </select>
+            </div>
+            <div style={s.formGroup}>
+              <label style={s.label}>
+                {linkForm.targetType === 'category' ? 'Categorie' : 'Product'}
+              </label>
+              <select
+                value={linkForm.targetId}
+                onChange={e => setLinkForm({ ...linkForm, targetId: e.target.value })}
+                style={s.input}
+              >
+                {linkForm.targetType === 'category'
+                  ? categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.icon} {cat.name}</option>
+                  ))
+                  : menuItems.map(item => (
+                    <option key={item.id} value={item.id}>
+                      {item.name} ({categories.find(c => c.id === item.category)?.name || item.category})
+                    </option>
+                  ))
+                }
+              </select>
+            </div>
+            <div style={s.formActions}>
+              <button onClick={() => setShowLinkForm(false)} style={s.cancelBtn}>Annuleren</button>
+              <button onClick={saveLink} style={s.saveBtn} disabled={saving}>
+                {saving ? 'Opslaan...' : 'Koppelen'}
               </button>
             </div>
           </div>
@@ -694,8 +914,8 @@ const s = {
   topBar: { display: 'flex', alignItems: 'center', gap: '16px', padding: '12px 24px', background: '#fff', borderBottom: '1px solid #e0e0e0', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', flexWrap: 'wrap' },
   backBtn: { padding: '8px 16px', border: '1px solid #ddd', borderRadius: '8px', background: '#fff', cursor: 'pointer', fontSize: '14px', fontWeight: '500' },
   title: { margin: 0, fontSize: '20px', fontWeight: 'bold', color: '#1a1a2e' },
-  tabs: { display: 'flex', gap: '4px', marginLeft: 'auto', background: '#f0f2f5', borderRadius: '8px', padding: '3px' },
-  tab: { padding: '8px 16px', border: 'none', borderRadius: '6px', background: 'transparent', cursor: 'pointer', fontSize: '13px', fontWeight: '600', color: '#666', transition: 'all 0.15s' },
+  tabs: { display: 'flex', gap: '4px', marginLeft: 'auto', background: '#f0f2f5', borderRadius: '8px', padding: '3px', flexWrap: 'wrap' },
+  tab: { padding: '8px 16px', border: 'none', borderRadius: '6px', background: 'transparent', cursor: 'pointer', fontSize: '13px', fontWeight: '600', color: '#666', transition: 'all 0.15s', whiteSpace: 'nowrap' },
   tabActive: { background: '#fff', color: '#1a1a2e', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
   content: { display: 'flex', height: 'calc(100vh - 60px)' },
   sidebar: { width: '220px', background: '#fff', borderRight: '1px solid #e0e0e0', padding: '16px 0', overflowY: 'auto' },
@@ -703,7 +923,7 @@ const s = {
   sidebarBtn: { display: 'flex', alignItems: 'center', gap: '10px', width: '100%', padding: '10px 20px', border: 'none', borderLeft: '3px solid transparent', background: 'none', cursor: 'pointer', fontSize: '13px', color: '#555', textAlign: 'left' },
   badge: { marginLeft: 'auto', background: '#f0f0f0', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', color: '#888' },
   main: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' },
-  mainHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px' },
+  mainHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', flexWrap: 'wrap', gap: '8px' },
   mainTitle: { margin: 0, fontSize: '18px', fontWeight: 'bold', color: '#1a1a2e' },
   addBtn: { padding: '8px 18px', border: 'none', borderRadius: '8px', background: '#e74c3c', color: '#fff', fontSize: '13px', fontWeight: 'bold', cursor: 'pointer' },
   list: { flex: 1, overflowY: 'auto', padding: '0 24px 24px' },
@@ -718,13 +938,23 @@ const s = {
   delBtn: { padding: '5px 10px', border: '1px solid #fdd', borderRadius: '6px', background: '#fff', fontSize: '14px', cursor: 'pointer', color: '#e74c3c', fontWeight: 'bold' },
   empty: { textAlign: 'center', padding: '40px', color: '#999', fontSize: '14px' },
 
-  // Group cards for customizations
+  // Group cards for modifier groups
   groupCard: { background: '#fff', borderRadius: '10px', marginBottom: '10px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', overflow: 'hidden' },
-  groupHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #f0f0f0' },
+  groupHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '12px 16px', borderBottom: '1px solid #f0f0f0' },
   groupName: { fontSize: '15px', fontWeight: '700', color: '#333' },
   groupType: { marginLeft: '10px', fontSize: '11px', color: '#999', fontWeight: '400' },
   groupOptions: { display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '12px 16px' },
   optionChip: { padding: '4px 10px', background: '#f5f5f5', borderRadius: '6px', fontSize: '12px', color: '#555' },
+
+  // Link cards
+  linkCard: { background: '#fff', borderRadius: '10px', marginBottom: '10px', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', overflow: 'hidden' },
+  linkCardHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: '1px solid #f0f0f0' },
+  linkAddBtn: { padding: '5px 14px', border: '1px solid #3498db', borderRadius: '6px', background: '#3498db10', fontSize: '12px', cursor: 'pointer', color: '#3498db', fontWeight: '600' },
+  linksList: { padding: '4px 16px 8px' },
+  linkRow: { display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid #f8f8f8' },
+  linkTypeBadge: { padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600', whiteSpace: 'nowrap' },
+  linkTarget: { flex: 1, fontSize: '13px', fontWeight: '500', color: '#333' },
+  linkDelBtn: { padding: '3px 10px', border: '1px solid #fdd', borderRadius: '4px', background: '#fff', fontSize: '11px', cursor: 'pointer', color: '#e74c3c' },
 
   // Modals
   overlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 },

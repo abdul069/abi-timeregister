@@ -3,7 +3,9 @@ import { useRouter } from 'next/router';
 import {
   getCategories,
   getMenuItems,
-  getCustomizationOptions,
+  getModifierGroups,
+  getModifierLinks,
+  resolveModifierGroups,
   saveOrder,
   getNextOrderNumber,
   formatPrice,
@@ -33,7 +35,8 @@ export default function Kassa() {
   const [orderType, setOrderType] = useState('afhalen');
   const [searchQuery, setSearchQuery] = useState('');
   const [processing, setProcessing] = useState(false);
-  const [customizationOptions, setCustomizationOptions] = useState({});
+  const [allModifierGroups, setAllModifierGroups] = useState([]);
+  const [allModifierLinks, setAllModifierLinks] = useState([]);
 
   // Customization modal state
   const [showCustomization, setShowCustomization] = useState(false);
@@ -49,14 +52,16 @@ export default function Kassa() {
 
   useEffect(() => {
     async function loadData() {
-      const [cats, items, customs] = await Promise.all([
+      const [cats, items, groups, links] = await Promise.all([
         getCategories(),
         getMenuItems(),
-        getCustomizationOptions(),
+        getModifierGroups(),
+        getModifierLinks(),
       ]);
       setCategories(cats);
       setMenuItems(items);
-      setCustomizationOptions(customs);
+      setAllModifierGroups(groups);
+      setAllModifierLinks(links);
     }
     loadData();
   }, []);
@@ -69,22 +74,27 @@ export default function Kassa() {
     return item.category === activeCategory;
   });
 
+  const getItemModifierGroups = (item) => {
+    return resolveModifierGroups(item, allModifierGroups, allModifierLinks);
+  };
+
   const hasCustomization = (item) => {
-    const hasOptions = customizationOptions[item.category] && customizationOptions[item.category].length > 0;
+    const groups = getItemModifierGroups(item);
     const hasVariations = item.variations && item.variations.length > 0;
-    return hasOptions || hasVariations;
+    return groups.length > 0 || hasVariations;
   };
 
   const handleProductClick = useCallback((item) => {
-    if (hasCustomization(item)) {
+    const groups = resolveModifierGroups(item, allModifierGroups, allModifierLinks);
+    const hasVariations = item.variations && item.variations.length > 0;
+
+    if (groups.length > 0 || hasVariations) {
       setCustomizingItem(item);
-      // Set default variation
-      if (item.variations && item.variations.length > 0) {
+      if (hasVariations) {
         setSelectedVariation(item.variations[0]);
       } else {
         setSelectedVariation(null);
       }
-      const groups = customizationOptions[item.category] || [];
       const defaults = {};
       groups.forEach(group => {
         if (group.type === 'single') {
@@ -98,20 +108,18 @@ export default function Kassa() {
     } else {
       addToCart(item, null, null);
     }
-  }, [menuItems, customizationOptions]);
+  }, [menuItems, allModifierGroups, allModifierLinks]);
 
   const addToCart = useCallback((item, customizations, variation) => {
     setCart(prev => {
       if (!customizations && !variation) {
-        // No customizations - merge by product id
         const existing = prev.find(c => c.id === item.id && !c.customizations && !c.variation);
         if (existing) {
           return prev.map(c => c.cartId === existing.cartId ? { ...c, quantity: c.quantity + 1 } : c);
         }
         return [...prev, { ...item, cartId: `${item.id}-plain`, quantity: 1, customizations: null, variation: null, extraPrice: 0 }];
       } else {
-        // With customizations/variation - always new entry
-        const extraPrice = calculateExtraPrice(item.category, customizations);
+        const extraPrice = calculateExtraPrice(item, customizations);
         const itemPrice = variation ? variation.price : item.price;
         return [...prev, {
           ...item,
@@ -124,12 +132,13 @@ export default function Kassa() {
         }];
       }
     });
-  }, []);
+  }, [allModifierGroups, allModifierLinks]);
 
-  const calculateExtraPrice = (category, customizations) => {
-    if (!customizations || !customizationOptions[category]) return 0;
+  const calculateExtraPrice = (item, customizations) => {
+    if (!customizations) return 0;
+    const groups = resolveModifierGroups(item, allModifierGroups, allModifierLinks);
     let extra = 0;
-    customizationOptions[category].forEach(group => {
+    groups.forEach(group => {
       if (group.type === 'single') {
         const selected = group.options.find(o => o.name === customizations[group.name]);
         if (selected) extra += selected.price;
@@ -241,10 +250,10 @@ export default function Kassa() {
     setSearchQuery('');
   };
 
-  const getCustomizationSummary = (customizations, category) => {
+  const getCustomizationSummary = (customizations, item) => {
     if (!customizations) return null;
     const parts = [];
-    const groups = customizationOptions[category] || [];
+    const groups = resolveModifierGroups(item, allModifierGroups, allModifierLinks);
     groups.forEach(group => {
       const val = customizations[group.name];
       if (!val) return;
@@ -259,7 +268,7 @@ export default function Kassa() {
           const opt = group.options.find(o => o.name === name);
           return opt && opt.price === 0;
         });
-        if (group.name === 'Groenten') {
+        if (freeItems.length > 0) {
           parts.push(freeItems.join(', '));
         }
         if (paidItems.length > 0) {
@@ -317,7 +326,7 @@ export default function Kassa() {
             </div>
           ) : (
             cart.map(item => {
-              const summary = getCustomizationSummary(item.customizations, item.category);
+              const summary = getCustomizationSummary(item.customizations, item);
               return (
                 <div key={item.cartId} style={styles.orderItem}>
                   <div style={styles.orderItemTop}>
@@ -503,7 +512,7 @@ export default function Kassa() {
                   </div>
                 </div>
               )}
-              {customizationOptions[customizingItem.category]?.map(group => (
+              {resolveModifierGroups(customizingItem, allModifierGroups, allModifierLinks).map(group => (
                 <div key={group.name} style={styles.customGroup}>
                   <h3 style={styles.customGroupTitle}>
                     {group.name}
@@ -556,7 +565,7 @@ export default function Kassa() {
                 Annuleren
               </button>
               <button onClick={confirmCustomization} style={styles.customAddBtn}>
-                Toevoegen — {formatPrice((selectedVariation ? selectedVariation.price : customizingItem.price) + calculateExtraPrice(customizingItem.category, customSelections))}
+                Toevoegen — {formatPrice((selectedVariation ? selectedVariation.price : customizingItem.price) + calculateExtraPrice(customizingItem, customSelections))}
               </button>
             </div>
           </div>
@@ -691,8 +700,7 @@ export default function Kassa() {
               <div style={styles.receiptDivider} />
 
               {lastOrder.items.map((item, i) => {
-                const cat = item.category || (menuItems.find(m => m.id === item.id)?.category) || '';
-                const summary = item.customizations ? getCustomizationSummary(item.customizations, cat) : null;
+                const summary = item.customizations ? getCustomizationSummary(item.customizations, item) : null;
                 return (
                   <div key={i}>
                     <div style={styles.receiptItem}>
