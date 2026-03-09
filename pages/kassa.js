@@ -8,6 +8,139 @@ import {
   formatPrice,
 } from '../lib/pos-data';
 
+// Customization options per category
+const CUSTOMIZATION_OPTIONS = {
+  burgers: [
+    {
+      name: 'Saus',
+      type: 'single',
+      options: [
+        { name: 'Geen saus', price: 0 },
+        { name: 'Mayonaise', price: 0 },
+        { name: 'Ketchup', price: 0 },
+        { name: 'Curry', price: 0 },
+        { name: 'Joppiesaus', price: 0 },
+        { name: 'Sambal', price: 0 },
+        { name: 'Knoflooksaus', price: 0 },
+        { name: 'BBQ Saus', price: 0 },
+      ]
+    },
+    {
+      name: 'Groenten',
+      type: 'multi',
+      defaultSelected: ['Sla', 'Tomaat', 'Ui', 'Augurk'],
+      options: [
+        { name: 'Sla', price: 0 },
+        { name: 'Tomaat', price: 0 },
+        { name: 'Ui', price: 0 },
+        { name: 'Augurk', price: 0 },
+        { name: 'Jalapeno', price: 0 },
+      ]
+    },
+    {
+      name: "Extra's",
+      type: 'multi',
+      options: [
+        { name: 'Extra Kaas', price: 0.75 },
+        { name: 'Extra Bacon', price: 1.00 },
+        { name: 'Extra Saus', price: 0.50 },
+      ]
+    }
+  ],
+  chicken: [
+    {
+      name: 'Saus',
+      type: 'single',
+      options: [
+        { name: 'Geen saus', price: 0 },
+        { name: 'Mayonaise', price: 0 },
+        { name: 'Ketchup', price: 0 },
+        { name: 'Curry', price: 0 },
+        { name: 'BBQ Saus', price: 0 },
+        { name: 'Sweet Chili', price: 0 },
+        { name: 'Knoflooksaus', price: 0 },
+      ]
+    },
+  ],
+  fries: [
+    {
+      name: 'Saus',
+      type: 'single',
+      options: [
+        { name: 'Geen saus', price: 0 },
+        { name: 'Mayonaise', price: 0.50 },
+        { name: 'Ketchup', price: 0.50 },
+        { name: 'Curry', price: 0.50 },
+        { name: 'Joppiesaus', price: 0.50 },
+        { name: 'Sambal', price: 0.50 },
+        { name: 'Knoflooksaus', price: 0.50 },
+        { name: 'BBQ Saus', price: 0.50 },
+        { name: 'Speciaal', price: 1.00 },
+      ]
+    },
+  ],
+  menu: [
+    {
+      name: 'Saus Burger',
+      type: 'single',
+      options: [
+        { name: 'Geen saus', price: 0 },
+        { name: 'Mayonaise', price: 0 },
+        { name: 'Ketchup', price: 0 },
+        { name: 'Curry', price: 0 },
+        { name: 'Joppiesaus', price: 0 },
+        { name: 'BBQ Saus', price: 0 },
+      ]
+    },
+    {
+      name: 'Groenten',
+      type: 'multi',
+      defaultSelected: ['Sla', 'Tomaat', 'Ui', 'Augurk'],
+      options: [
+        { name: 'Sla', price: 0 },
+        { name: 'Tomaat', price: 0 },
+        { name: 'Ui', price: 0 },
+        { name: 'Augurk', price: 0 },
+      ]
+    },
+    {
+      name: 'Drank',
+      type: 'single',
+      options: [
+        { name: 'Cola', price: 0 },
+        { name: 'Cola Zero', price: 0 },
+        { name: 'Fanta', price: 0 },
+        { name: 'Sprite', price: 0 },
+        { name: 'Ice Tea', price: 0 },
+        { name: 'Water', price: 0 },
+      ]
+    },
+    {
+      name: 'Saus Patat',
+      type: 'single',
+      options: [
+        { name: 'Geen saus', price: 0 },
+        { name: 'Mayonaise', price: 0 },
+        { name: 'Ketchup', price: 0 },
+        { name: 'Curry', price: 0 },
+        { name: 'Speciaal', price: 0 },
+      ]
+    },
+  ],
+};
+
+// Category colors for the grid buttons (Lightspeed style)
+const CATEGORY_COLORS = {
+  burgers: '#c0392b',
+  chicken: '#d35400',
+  fries: '#f39c12',
+  drinks: '#2980b9',
+  desserts: '#8e44ad',
+  menu: '#27ae60',
+  sauzen: '#16a085',
+  extras: '#7f8c8d',
+};
+
 export default function Kassa() {
   const router = useRouter();
   const [categories, setCategories] = useState([]);
@@ -20,6 +153,15 @@ export default function Kassa() {
   const [orderType, setOrderType] = useState('afhalen');
   const [searchQuery, setSearchQuery] = useState('');
   const [processing, setProcessing] = useState(false);
+
+  // Customization modal state
+  const [showCustomization, setShowCustomization] = useState(false);
+  const [customizingItem, setCustomizingItem] = useState(null);
+  const [customSelections, setCustomSelections] = useState({});
+
+  // Cash payment state
+  const [showCashInput, setShowCashInput] = useState(false);
+  const [cashGiven, setCashGiven] = useState('');
 
   useEffect(() => {
     async function loadData() {
@@ -38,26 +180,88 @@ export default function Kassa() {
     return item.category === activeCategory;
   });
 
-  const addToCart = useCallback((item) => {
+  const hasCustomization = (item) => {
+    return CUSTOMIZATION_OPTIONS[item.category] && CUSTOMIZATION_OPTIONS[item.category].length > 0;
+  };
+
+  const handleProductClick = useCallback((item) => {
+    if (hasCustomization(item)) {
+      setCustomizingItem(item);
+      const groups = CUSTOMIZATION_OPTIONS[item.category];
+      const defaults = {};
+      groups.forEach(group => {
+        if (group.type === 'single') {
+          defaults[group.name] = group.options[0].name;
+        } else if (group.type === 'multi') {
+          defaults[group.name] = group.defaultSelected ? [...group.defaultSelected] : [];
+        }
+      });
+      setCustomSelections(defaults);
+      setShowCustomization(true);
+    } else {
+      addToCart(item, null);
+    }
+  }, [menuItems]);
+
+  const addToCart = useCallback((item, customizations) => {
     setCart(prev => {
-      const existing = prev.find(c => c.id === item.id);
-      if (existing) {
-        return prev.map(c => c.id === item.id ? { ...c, quantity: c.quantity + 1 } : c);
+      if (!customizations) {
+        // No customizations - merge by product id
+        const existing = prev.find(c => c.id === item.id && !c.customizations);
+        if (existing) {
+          return prev.map(c => c.cartId === existing.cartId ? { ...c, quantity: c.quantity + 1 } : c);
+        }
+        return [...prev, { ...item, cartId: `${item.id}-plain`, quantity: 1, customizations: null, extraPrice: 0 }];
+      } else {
+        // With customizations - always new entry
+        const extraPrice = calculateExtraPrice(item.category, customizations);
+        return [...prev, {
+          ...item,
+          cartId: `${item.id}-${Date.now()}`,
+          quantity: 1,
+          customizations,
+          extraPrice,
+        }];
       }
-      return [...prev, { ...item, quantity: 1 }];
     });
   }, []);
 
-  const updateQuantity = useCallback((itemId, delta) => {
+  const calculateExtraPrice = (category, customizations) => {
+    if (!customizations || !CUSTOMIZATION_OPTIONS[category]) return 0;
+    let extra = 0;
+    CUSTOMIZATION_OPTIONS[category].forEach(group => {
+      if (group.type === 'single') {
+        const selected = group.options.find(o => o.name === customizations[group.name]);
+        if (selected) extra += selected.price;
+      } else if (group.type === 'multi') {
+        const selectedNames = customizations[group.name] || [];
+        selectedNames.forEach(name => {
+          const opt = group.options.find(o => o.name === name);
+          if (opt) extra += opt.price;
+        });
+      }
+    });
+    return extra;
+  };
+
+  const confirmCustomization = () => {
+    if (customizingItem) {
+      addToCart(customizingItem, { ...customSelections });
+      setShowCustomization(false);
+      setCustomizingItem(null);
+    }
+  };
+
+  const updateQuantity = useCallback((cartId, delta) => {
     setCart(prev => {
       return prev
-        .map(c => c.id === itemId ? { ...c, quantity: c.quantity + delta } : c)
+        .map(c => c.cartId === cartId ? { ...c, quantity: c.quantity + delta } : c)
         .filter(c => c.quantity > 0);
     });
   }, []);
 
-  const removeFromCart = useCallback((itemId) => {
-    setCart(prev => prev.filter(c => c.id !== itemId));
+  const removeFromCart = useCallback((cartId) => {
+    setCart(prev => prev.filter(c => c.cartId !== cartId));
   }, []);
 
   const clearCart = useCallback(() => {
@@ -65,12 +269,14 @@ export default function Kassa() {
     setSearchQuery('');
   }, []);
 
-  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  const btw = subtotal * 0.09; // 9% BTW
+  const subtotal = cart.reduce((sum, item) => sum + (item.price + (item.extraPrice || 0)) * item.quantity, 0);
+  const btw = subtotal * 0.09;
   const total = subtotal + btw;
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const processPayment = async (method) => {
+  const getItemTotal = (item) => (item.price + (item.extraPrice || 0)) * item.quantity;
+
+  const processPayment = async (method, cashInfo) => {
     if (processing) return;
     setProcessing(true);
     try {
@@ -78,7 +284,14 @@ export default function Kassa() {
       const order = {
         id: `ORD-${Date.now()}`,
         number: orderNumber,
-        items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+        items: cart.map(c => ({
+          id: c.id,
+          name: c.name,
+          price: c.price,
+          extraPrice: c.extraPrice || 0,
+          quantity: c.quantity,
+          customizations: c.customizations || null,
+        })),
         subtotal,
         btw,
         total,
@@ -89,9 +302,15 @@ export default function Kassa() {
         time: new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
         timestamp: Date.now(),
       };
+      if (cashInfo) {
+        order.cashGiven = cashInfo.given;
+        order.cashChange = cashInfo.change;
+      }
       await saveOrder(order);
       setLastOrder(order);
       setShowPayment(false);
+      setShowCashInput(false);
+      setCashGiven('');
       setShowReceipt(true);
       setCart([]);
     } catch (err) {
@@ -102,25 +321,74 @@ export default function Kassa() {
     }
   };
 
+  const handleCashPayment = () => {
+    setShowCashInput(true);
+    setCashGiven('');
+  };
+
+  const confirmCashPayment = () => {
+    const given = parseFloat(cashGiven);
+    if (isNaN(given) || given < total) return;
+    processPayment('contant', { given, change: given - total });
+  };
+
   const closeReceipt = () => {
     setShowReceipt(false);
     setLastOrder(null);
     setSearchQuery('');
   };
 
+  const getCustomizationSummary = (customizations, category) => {
+    if (!customizations) return null;
+    const parts = [];
+    const groups = CUSTOMIZATION_OPTIONS[category] || [];
+    groups.forEach(group => {
+      const val = customizations[group.name];
+      if (!val) return;
+      if (group.type === 'single' && val && val !== 'Geen saus') {
+        parts.push(val);
+      } else if (group.type === 'multi' && Array.isArray(val) && val.length > 0) {
+        const paidItems = val.filter(name => {
+          const opt = group.options.find(o => o.name === name);
+          return opt && opt.price > 0;
+        });
+        const freeItems = val.filter(name => {
+          const opt = group.options.find(o => o.name === name);
+          return opt && opt.price === 0;
+        });
+        if (group.name === 'Groenten') {
+          parts.push(freeItems.join(', '));
+        }
+        if (paidItems.length > 0) {
+          parts.push(paidItems.join(', '));
+        }
+      }
+    });
+    return parts.length > 0 ? parts.join(' · ') : null;
+  };
+
+  const cashGivenNum = parseFloat(cashGiven) || 0;
+  const cashChange = cashGivenNum - total;
+
+  // Get count of items in cart for a product (for badge)
+  const getCartCount = (itemId) => {
+    return cart.filter(c => c.id === itemId).reduce((sum, c) => sum + c.quantity, 0);
+  };
+
   return (
     <div style={styles.container}>
-      {/* Left: Categories + Products */}
-      <div style={styles.leftPanel}>
-        {/* Top bar */}
-        <div style={styles.topBar}>
-          <button onClick={() => router.push('/pos')} style={styles.backBtn}>← Terug</button>
-          <h1 style={styles.title}>Kassa</h1>
-          <div style={styles.orderTypeToggle}>
+      {/* LEFT: Order Panel */}
+      <div style={styles.orderPanel}>
+        <div style={styles.orderHeader}>
+          <button onClick={() => router.push('/pos')} style={styles.backBtn}>
+            ← Terug
+          </button>
+          <span style={styles.orderTitle}>Bestelling</span>
+          <div style={styles.orderTypePills}>
             <button
               style={{
-                ...styles.typeBtn,
-                ...(orderType === 'afhalen' ? styles.typeBtnActive : {}),
+                ...styles.pillBtn,
+                ...(orderType === 'afhalen' ? styles.pillActive : {}),
               }}
               onClick={() => setOrderType('afhalen')}
             >
@@ -128,138 +396,71 @@ export default function Kassa() {
             </button>
             <button
               style={{
-                ...styles.typeBtn,
-                ...(orderType === 'ter plaatse' ? styles.typeBtnActive : {}),
+                ...styles.pillBtn,
+                ...(orderType === 'ter plaatse' ? styles.pillActive : {}),
               }}
               onClick={() => setOrderType('ter plaatse')}
             >
               Ter Plaatse
             </button>
           </div>
-          <div style={styles.searchBox}>
-            <input
-              type="text"
-              placeholder="Zoek product..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              style={styles.searchInput}
-            />
-            {searchQuery && (
-              <button onClick={() => setSearchQuery('')} style={styles.clearSearch}>x</button>
-            )}
-          </div>
         </div>
 
-        {/* Categories */}
-        <div style={styles.categoriesBar}>
-          {categories.map(cat => (
-            <button
-              key={cat.id}
-              onClick={() => { setActiveCategory(cat.id); setSearchQuery(''); }}
-              style={{
-                ...styles.categoryBtn,
-                borderBottom: activeCategory === cat.id && !searchQuery ? `3px solid ${cat.color}` : '3px solid transparent',
-                color: activeCategory === cat.id && !searchQuery ? cat.color : '#666',
-                fontWeight: activeCategory === cat.id && !searchQuery ? 'bold' : 'normal',
-              }}
-            >
-              <span style={styles.catIcon}>{cat.icon}</span>
-              <span style={styles.catName}>{cat.name}</span>
-            </button>
-          ))}
-        </div>
-
-        {/* Product Grid */}
-        <div style={styles.productGrid}>
-          {filteredItems.length === 0 && (
-            <div style={styles.emptyState}>
-              {searchQuery ? `Geen resultaten voor "${searchQuery}"` : 'Geen producten in deze categorie'}
-            </div>
-          )}
-          {filteredItems.map(item => {
-            const inCart = cart.find(c => c.id === item.id);
-            return (
-              <button
-                key={item.id}
-                onClick={() => addToCart(item)}
-                style={{
-                  ...styles.productBtn,
-                  borderColor: inCart ? '#e74c3c' : '#e0e0e0',
-                  boxShadow: inCart ? '0 0 0 2px #e74c3c' : 'none',
-                }}
-              >
-                <div style={styles.productName}>{item.name}</div>
-                <div style={styles.productPrice}>{formatPrice(item.price)}</div>
-                {inCart && (
-                  <div style={styles.cartBadge}>{inCart.quantity}</div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Right: Cart / Order Summary */}
-      <div style={styles.rightPanel}>
-        <div style={styles.cartHeader}>
-          <h2 style={styles.cartTitle}>Bestelling</h2>
-          <span style={styles.cartCount}>{totalItems} items</span>
-        </div>
-
-        <div style={styles.cartItems}>
+        <div style={styles.orderItems}>
           {cart.length === 0 ? (
             <div style={styles.emptyCart}>
-              <div style={{ fontSize: '48px', marginBottom: '12px' }}>🛒</div>
-              <div>Tik op een product om toe te voegen</div>
+              <div style={{ fontSize: '36px', marginBottom: '8px', opacity: 0.4 }}>🛒</div>
+              <div>Geen items</div>
             </div>
           ) : (
-            cart.map(item => (
-              <div key={item.id} style={styles.cartItem}>
-                <div style={styles.cartItemInfo}>
-                  <div style={styles.cartItemName}>{item.name}</div>
-                  <div style={styles.cartItemPrice}>{formatPrice(item.price * item.quantity)}</div>
+            cart.map(item => {
+              const summary = getCustomizationSummary(item.customizations, item.category);
+              return (
+                <div key={item.cartId} style={styles.orderItem}>
+                  <div style={styles.orderItemTop}>
+                    <div style={styles.orderItemQty}>
+                      <button onClick={() => updateQuantity(item.cartId, -1)} style={styles.qtyBtnSmall}>-</button>
+                      <span style={styles.qtyNum}>{item.quantity}</span>
+                      <button onClick={() => updateQuantity(item.cartId, 1)} style={styles.qtyBtnSmall}>+</button>
+                    </div>
+                    <div style={styles.orderItemDetails}>
+                      <div style={styles.orderItemName}>{item.name}</div>
+                      {summary && (
+                        <div style={styles.orderItemCustom}>{summary}</div>
+                      )}
+                    </div>
+                    <div style={styles.orderItemPrice}>
+                      {formatPrice(getItemTotal(item))}
+                    </div>
+                    <button onClick={() => removeFromCart(item.cartId)} style={styles.removeBtn}>×</button>
+                  </div>
                 </div>
-                <div style={styles.cartItemActions}>
-                  <button
-                    onClick={() => updateQuantity(item.id, -1)}
-                    style={styles.qtyBtn}
-                  >-</button>
-                  <span style={styles.qtyDisplay}>{item.quantity}</span>
-                  <button
-                    onClick={() => updateQuantity(item.id, 1)}
-                    style={styles.qtyBtn}
-                  >+</button>
-                  <button
-                    onClick={() => removeFromCart(item.id)}
-                    style={styles.deleteBtn}
-                  >🗑</button>
-                </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
-        {/* Totals */}
-        <div style={styles.totalsSection}>
-          <div style={styles.totalRow}>
+        {/* Order Totals */}
+        <div style={styles.orderTotals}>
+          <div style={styles.totalLine}>
             <span>Subtotaal</span>
             <span>{formatPrice(subtotal)}</span>
           </div>
-          <div style={styles.totalRow}>
-            <span>BTW (9%)</span>
+          <div style={styles.totalLine}>
+            <span>BTW 9%</span>
             <span>{formatPrice(btw)}</span>
           </div>
-          <div style={styles.totalRowBig}>
+          <div style={styles.totalLineMain}>
             <span>Totaal</span>
             <span>{formatPrice(total)}</span>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div style={styles.actionButtons}>
+        {/* Bottom Actions */}
+        <div style={styles.orderActions}>
           <button
             onClick={clearCart}
-            style={styles.clearBtn}
+            style={styles.clearOrderBtn}
             disabled={cart.length === 0}
           >
             Wissen
@@ -267,7 +468,7 @@ export default function Kassa() {
           <button
             onClick={() => setShowPayment(true)}
             style={{
-              ...styles.payBtn,
+              ...styles.checkoutBtn,
               opacity: cart.length === 0 ? 0.5 : 1,
             }}
             disabled={cart.length === 0}
@@ -277,43 +478,279 @@ export default function Kassa() {
         </div>
       </div>
 
-      {/* Payment Modal */}
-      {showPayment && (
+      {/* MIDDLE: Categories */}
+      <div style={styles.categoryPanel}>
+        <div style={styles.searchBoxDark}>
+          <input
+            type="text"
+            placeholder="🔍 Zoeken..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            style={styles.searchInputDark}
+          />
+          {searchQuery && (
+            <button onClick={() => setSearchQuery('')} style={styles.clearSearchDark}>×</button>
+          )}
+        </div>
+        <div style={styles.categoryList}>
+          {categories.map(cat => {
+            const catColor = CATEGORY_COLORS[cat.id] || '#555';
+            const isActive = activeCategory === cat.id && !searchQuery;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => { setActiveCategory(cat.id); setSearchQuery(''); }}
+                style={{
+                  ...styles.categoryBtn,
+                  background: isActive ? catColor : 'rgba(255,255,255,0.08)',
+                  borderColor: isActive ? catColor : 'transparent',
+                  color: isActive ? '#fff' : '#bbb',
+                }}
+              >
+                <span style={styles.catEmoji}>{cat.icon}</span>
+                <span style={styles.catLabel}>{cat.name}</span>
+                <span style={styles.catCount}>
+                  {menuItems.filter(i => i.category === cat.id && i.available).length}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* RIGHT: Products Grid */}
+      <div style={styles.productPanel}>
+        <div style={styles.productHeader}>
+          <h2 style={styles.productTitle}>
+            {searchQuery ? `Zoeken: "${searchQuery}"` : (
+              <>
+                {categories.find(c => c.id === activeCategory)?.icon}{' '}
+                {categories.find(c => c.id === activeCategory)?.name}
+              </>
+            )}
+          </h2>
+          <span style={styles.productCount}>{filteredItems.length} items</span>
+        </div>
+        <div style={styles.productGrid}>
+          {filteredItems.length === 0 && (
+            <div style={styles.emptyProducts}>
+              {searchQuery ? `Geen resultaten voor "${searchQuery}"` : 'Geen producten'}
+            </div>
+          )}
+          {filteredItems.map(item => {
+            const count = getCartCount(item.id);
+            const catColor = CATEGORY_COLORS[item.category] || '#555';
+            return (
+              <button
+                key={item.id}
+                onClick={() => handleProductClick(item)}
+                style={{
+                  ...styles.productBtn,
+                  borderColor: count > 0 ? '#27ae60' : catColor,
+                  borderTopWidth: '3px',
+                }}
+              >
+                <div style={styles.productName}>{item.name}</div>
+                <div style={styles.productPrice}>{formatPrice(item.price)}</div>
+                {count > 0 && (
+                  <div style={styles.productBadge}>{count}</div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* CUSTOMIZATION MODAL */}
+      {showCustomization && customizingItem && (
+        <div style={styles.modalOverlay} onClick={() => setShowCustomization(false)}>
+          <div style={styles.customModal} onClick={e => e.stopPropagation()}>
+            <div style={styles.customHeader}>
+              <h2 style={styles.customTitle}>{customizingItem.name}</h2>
+              <span style={styles.customPrice}>{formatPrice(customizingItem.price)}</span>
+            </div>
+
+            <div style={styles.customBody}>
+              {CUSTOMIZATION_OPTIONS[customizingItem.category]?.map(group => (
+                <div key={group.name} style={styles.customGroup}>
+                  <h3 style={styles.customGroupTitle}>
+                    {group.name}
+                    <span style={styles.customGroupType}>
+                      {group.type === 'single' ? '(kies 1)' : '(meerdere)'}
+                    </span>
+                  </h3>
+                  <div style={styles.customOptions}>
+                    {group.options.map(opt => {
+                      const isSelected = group.type === 'single'
+                        ? customSelections[group.name] === opt.name
+                        : (customSelections[group.name] || []).includes(opt.name);
+                      return (
+                        <button
+                          key={opt.name}
+                          style={{
+                            ...styles.customOptionBtn,
+                            background: isSelected ? '#27ae60' : 'rgba(255,255,255,0.08)',
+                            borderColor: isSelected ? '#27ae60' : 'rgba(255,255,255,0.15)',
+                            color: isSelected ? '#fff' : '#ccc',
+                          }}
+                          onClick={() => {
+                            if (group.type === 'single') {
+                              setCustomSelections(prev => ({ ...prev, [group.name]: opt.name }));
+                            } else {
+                              setCustomSelections(prev => {
+                                const arr = prev[group.name] || [];
+                                if (arr.includes(opt.name)) {
+                                  return { ...prev, [group.name]: arr.filter(n => n !== opt.name) };
+                                }
+                                return { ...prev, [group.name]: [...arr, opt.name] };
+                              });
+                            }
+                          }}
+                        >
+                          <span>{opt.name}</span>
+                          {opt.price > 0 && (
+                            <span style={styles.optionPrice}>+{formatPrice(opt.price)}</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div style={styles.customFooter}>
+              <button onClick={() => setShowCustomization(false)} style={styles.customCancelBtn}>
+                Annuleren
+              </button>
+              <button onClick={confirmCustomization} style={styles.customAddBtn}>
+                Toevoegen — {formatPrice(customizingItem.price + calculateExtraPrice(customizingItem.category, customSelections))}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PAYMENT MODAL */}
+      {showPayment && !showCashInput && (
         <div style={styles.modalOverlay} onClick={() => setShowPayment(false)}>
           <div style={styles.paymentModal} onClick={e => e.stopPropagation()}>
-            <h2 style={styles.modalTitle}>Afrekenen</h2>
-            <div style={styles.modalTotal}>
-              <span>Te betalen:</span>
-              <span style={styles.modalAmount}>{formatPrice(total)}</span>
+            <h2 style={styles.payModalTitle}>Afrekenen</h2>
+            <div style={styles.payTotal}>
+              <span style={styles.payTotalLabel}>Te betalen</span>
+              <span style={styles.payTotalAmount}>{formatPrice(total)}</span>
             </div>
-            <div style={styles.paymentMethods}>
-              <button onClick={() => processPayment('pin')} style={styles.payMethodBtn} disabled={processing}>
-                <span style={{ fontSize: '40px' }}>💳</span>
-                <span>PIN</span>
+            <div style={styles.payMethods}>
+              <button onClick={() => processPayment('pin')} style={{ ...styles.payMethodBtn, borderColor: '#3498db' }} disabled={processing}>
+                <span style={{ fontSize: '36px' }}>💳</span>
+                <span style={styles.payMethodLabel}>PIN</span>
               </button>
-              <button onClick={() => processPayment('contant')} style={styles.payMethodBtn} disabled={processing}>
-                <span style={{ fontSize: '40px' }}>💵</span>
-                <span>Contant</span>
+              <button onClick={handleCashPayment} style={{ ...styles.payMethodBtn, borderColor: '#27ae60' }} disabled={processing}>
+                <span style={{ fontSize: '36px' }}>💵</span>
+                <span style={styles.payMethodLabel}>Contant</span>
               </button>
-              <button onClick={() => processPayment('online')} style={styles.payMethodBtn} disabled={processing}>
-                <span style={{ fontSize: '40px' }}>📱</span>
-                <span>Online</span>
+              <button onClick={() => processPayment('online')} style={{ ...styles.payMethodBtn, borderColor: '#9b59b6' }} disabled={processing}>
+                <span style={{ fontSize: '36px' }}>📱</span>
+                <span style={styles.payMethodLabel}>Online</span>
               </button>
             </div>
-            <button onClick={() => setShowPayment(false)} style={styles.cancelBtn}>
+            <button onClick={() => setShowPayment(false)} style={styles.payCancelBtn}>
               Annuleren
             </button>
           </div>
         </div>
       )}
 
-      {/* Receipt Modal */}
+      {/* CASH INPUT MODAL */}
+      {showPayment && showCashInput && (
+        <div style={styles.modalOverlay} onClick={() => { setShowCashInput(false); }}>
+          <div style={styles.cashModal} onClick={e => e.stopPropagation()}>
+            <h2 style={styles.payModalTitle}>Contant Betalen</h2>
+            <div style={styles.cashTotalRow}>
+              <span>Te betalen:</span>
+              <span style={styles.cashTotalAmount}>{formatPrice(total)}</span>
+            </div>
+
+            <div style={styles.cashQuickBtns}>
+              {[5, 10, 20, 50, 100].map(amount => (
+                <button
+                  key={amount}
+                  style={{
+                    ...styles.cashQuickBtn,
+                    opacity: amount < total ? 0.4 : 1,
+                  }}
+                  onClick={() => setCashGiven(String(amount))}
+                  disabled={amount < total}
+                >
+                  €{amount}
+                </button>
+              ))}
+              <button
+                style={styles.cashQuickBtnExact}
+                onClick={() => setCashGiven(total.toFixed(2))}
+              >
+                Exact
+              </button>
+            </div>
+
+            <div style={styles.cashInputRow}>
+              <label style={styles.cashInputLabel}>Ontvangen bedrag:</label>
+              <div style={styles.cashInputWrapper}>
+                <span style={styles.cashEuro}>€</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={cashGiven}
+                  onChange={e => setCashGiven(e.target.value)}
+                  style={styles.cashInput}
+                  placeholder="0.00"
+                  autoFocus
+                />
+              </div>
+            </div>
+
+            {cashGivenNum >= total && cashGiven !== '' && (
+              <div style={styles.changeBox}>
+                <span style={styles.changeLabel}>Wisselgeld terug:</span>
+                <span style={styles.changeAmount}>{formatPrice(cashChange)}</span>
+              </div>
+            )}
+
+            {cashGivenNum > 0 && cashGivenNum < total && (
+              <div style={styles.changeBoxError}>
+                <span>Onvoldoende — nog {formatPrice(total - cashGivenNum)} nodig</span>
+              </div>
+            )}
+
+            <div style={styles.cashActions}>
+              <button onClick={() => setShowCashInput(false)} style={styles.payCancelBtn}>
+                ← Terug
+              </button>
+              <button
+                onClick={confirmCashPayment}
+                style={{
+                  ...styles.cashConfirmBtn,
+                  opacity: cashGivenNum >= total && cashGiven !== '' ? 1 : 0.4,
+                }}
+                disabled={cashGivenNum < total || cashGiven === '' || processing}
+              >
+                {processing ? 'Verwerken...' : 'Bevestig Betaling'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RECEIPT MODAL */}
       {showReceipt && lastOrder && (
         <div style={styles.modalOverlay} onClick={closeReceipt}>
           <div style={styles.receiptModal} onClick={e => e.stopPropagation()}>
             <div style={styles.receiptContent}>
               <div style={styles.receiptHeader}>
-                <div style={{ fontSize: '24px', fontWeight: 'bold' }}>BESTELLING #{lastOrder.number}</div>
+                <div style={{ fontSize: '22px', fontWeight: 'bold', color: '#fff' }}>
+                  BESTELLING #{lastOrder.number}
+                </div>
                 <div style={styles.receiptBadge}>
                   {lastOrder.orderType === 'afhalen' ? '📦 Afhalen' : '🍽 Ter Plaatse'}
                 </div>
@@ -322,9 +759,23 @@ export default function Kassa() {
               <div style={styles.receiptDivider} />
 
               {lastOrder.items.map((item, i) => (
-                <div key={i} style={styles.receiptItem}>
-                  <span>{item.quantity}x {item.name}</span>
-                  <span>{formatPrice(item.price * item.quantity)}</span>
+                <div key={i}>
+                  <div style={styles.receiptItem}>
+                    <span>{item.quantity}x {item.name}</span>
+                    <span>{formatPrice((item.price + (item.extraPrice || 0)) * item.quantity)}</span>
+                  </div>
+                  {item.customizations && (
+                    <div style={styles.receiptCustom}>
+                      {getCustomizationSummary(item.customizations, item.category || '') || ''}
+                      {/* Show category from the original menu items */}
+                      {(() => {
+                        const menuItem = menuItems.find(m => m.id === item.id);
+                        if (!menuItem) return null;
+                        const summary = getCustomizationSummary(item.customizations, menuItem.category);
+                        return summary ? summary : null;
+                      })()}
+                    </div>
+                  )}
                 </div>
               ))}
 
@@ -338,16 +789,26 @@ export default function Kassa() {
                 <span>BTW (9%)</span>
                 <span>{formatPrice(lastOrder.btw)}</span>
               </div>
-              <div style={{ ...styles.receiptItem, fontWeight: 'bold', fontSize: '20px' }}>
+              <div style={{ ...styles.receiptItem, fontWeight: 'bold', fontSize: '18px', color: '#fff' }}>
                 <span>Totaal</span>
                 <span>{formatPrice(lastOrder.total)}</span>
               </div>
 
               <div style={styles.receiptDivider} />
 
-              <div style={{ textAlign: 'center', color: '#666' }}>
+              <div style={{ textAlign: 'center', color: '#999' }}>
                 <div>Betaald met: {lastOrder.paymentMethod.toUpperCase()}</div>
-                <div>{lastOrder.date} {lastOrder.time}</div>
+                {lastOrder.cashGiven && (
+                  <>
+                    <div style={{ marginTop: '4px' }}>
+                      Ontvangen: {formatPrice(lastOrder.cashGiven)}
+                    </div>
+                    <div style={{ fontWeight: 'bold', color: '#27ae60', fontSize: '16px' }}>
+                      Wisselgeld: {formatPrice(lastOrder.cashChange)}
+                    </div>
+                  </>
+                )}
+                <div style={{ marginTop: '4px' }}>{lastOrder.date} {lastOrder.time}</div>
               </div>
             </div>
 
@@ -362,203 +823,76 @@ export default function Kassa() {
 }
 
 const styles = {
+  // ===== LAYOUT =====
   container: {
     display: 'flex',
     height: '100vh',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    background: '#f0f2f5',
+    background: '#0d1117',
+    color: '#e6edf3',
     overflow: 'hidden',
   },
-  leftPanel: {
-    flex: 1,
+
+  // ===== LEFT: ORDER PANEL =====
+  orderPanel: {
+    width: '320px',
     display: 'flex',
     flexDirection: 'column',
-    overflow: 'hidden',
+    background: '#161b22',
+    borderRight: '1px solid #30363d',
   },
-  topBar: {
+  orderHeader: {
+    padding: '12px 16px',
+    borderBottom: '1px solid #30363d',
     display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-    padding: '12px 20px',
-    background: '#fff',
-    borderBottom: '1px solid #e0e0e0',
-    flexWrap: 'wrap',
+    flexDirection: 'column',
+    gap: '10px',
   },
   backBtn: {
-    padding: '8px 16px',
-    border: '1px solid #ddd',
-    borderRadius: '8px',
-    background: '#fff',
-    cursor: 'pointer',
-    fontSize: '14px',
-    fontWeight: '500',
-  },
-  title: {
-    margin: 0,
-    fontSize: '22px',
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-  },
-  orderTypeToggle: {
-    display: 'flex',
-    borderRadius: '8px',
-    overflow: 'hidden',
-    border: '1px solid #ddd',
-  },
-  typeBtn: {
-    padding: '8px 16px',
-    border: 'none',
-    background: '#f5f5f5',
+    padding: '6px 12px',
+    border: '1px solid #30363d',
+    borderRadius: '6px',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#8b949e',
     cursor: 'pointer',
     fontSize: '13px',
-    fontWeight: '500',
-    transition: 'all 0.2s',
+    alignSelf: 'flex-start',
   },
-  typeBtnActive: {
-    background: '#e74c3c',
-    color: '#fff',
-  },
-  searchBox: {
-    position: 'relative',
-    marginLeft: 'auto',
-  },
-  searchInput: {
-    padding: '8px 36px 8px 12px',
-    border: '1px solid #ddd',
-    borderRadius: '8px',
-    fontSize: '14px',
-    width: '200px',
-    outline: 'none',
-  },
-  clearSearch: {
-    position: 'absolute',
-    right: '8px',
-    top: '50%',
-    transform: 'translateY(-50%)',
-    border: 'none',
-    background: 'none',
+  orderTitle: {
     fontSize: '18px',
-    cursor: 'pointer',
-    color: '#999',
+    fontWeight: 'bold',
+    color: '#e6edf3',
   },
-  categoriesBar: {
+  orderTypePills: {
     display: 'flex',
     gap: '4px',
-    padding: '0 16px',
-    background: '#fff',
-    borderBottom: '1px solid #e0e0e0',
-    overflowX: 'auto',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    background: '#0d1117',
+    padding: '3px',
   },
-  categoryBtn: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    padding: '10px 14px',
-    border: 'none',
-    background: 'none',
-    cursor: 'pointer',
-    fontSize: '12px',
-    whiteSpace: 'nowrap',
-    transition: 'all 0.2s',
-    minWidth: '70px',
-  },
-  catIcon: {
-    fontSize: '22px',
-    marginBottom: '4px',
-  },
-  catName: {
-    fontSize: '11px',
-  },
-  productGrid: {
+  pillBtn: {
     flex: 1,
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
-    gap: '10px',
-    padding: '16px',
-    overflowY: 'auto',
-    alignContent: 'start',
-  },
-  productBtn: {
-    position: 'relative',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: '16px 10px',
-    border: '2px solid #e0e0e0',
-    borderRadius: '12px',
-    background: '#fff',
+    padding: '8px',
+    border: 'none',
+    borderRadius: '6px',
+    background: 'transparent',
+    color: '#8b949e',
     cursor: 'pointer',
-    transition: 'all 0.15s',
-    minHeight: '90px',
-    textAlign: 'center',
-  },
-  productName: {
     fontSize: '13px',
     fontWeight: '600',
-    marginBottom: '6px',
-    color: '#333',
-    lineHeight: '1.2',
+    transition: 'all 0.15s',
   },
-  productPrice: {
-    fontSize: '15px',
-    fontWeight: 'bold',
-    color: '#e74c3c',
-  },
-  cartBadge: {
-    position: 'absolute',
-    top: '-8px',
-    right: '-8px',
-    width: '26px',
-    height: '26px',
-    borderRadius: '50%',
-    background: '#e74c3c',
+  pillActive: {
+    background: '#238636',
     color: '#fff',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '13px',
-    fontWeight: 'bold',
   },
-  emptyState: {
-    gridColumn: '1 / -1',
-    textAlign: 'center',
-    padding: '40px',
-    color: '#999',
-    fontSize: '16px',
-  },
-  rightPanel: {
-    width: '360px',
-    display: 'flex',
-    flexDirection: 'column',
-    background: '#fff',
-    borderLeft: '1px solid #e0e0e0',
-    boxShadow: '-2px 0 10px rgba(0,0,0,0.05)',
-  },
-  cartHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '16px 20px',
-    borderBottom: '1px solid #f0f0f0',
-  },
-  cartTitle: {
-    margin: 0,
-    fontSize: '18px',
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-  },
-  cartCount: {
-    fontSize: '13px',
-    color: '#999',
-    background: '#f0f0f0',
-    padding: '4px 10px',
-    borderRadius: '12px',
-  },
-  cartItems: {
+
+  // Order Items
+  orderItems: {
     flex: 1,
     overflowY: 'auto',
-    padding: '10px 20px',
+    padding: '8px',
   },
   emptyCart: {
     display: 'flex',
@@ -566,154 +900,446 @@ const styles = {
     alignItems: 'center',
     justifyContent: 'center',
     height: '100%',
-    color: '#999',
+    color: '#484f58',
     fontSize: '14px',
-    textAlign: 'center',
   },
-  cartItem: {
-    padding: '10px 0',
-    borderBottom: '1px solid #f5f5f5',
+  orderItem: {
+    padding: '10px 12px',
+    marginBottom: '4px',
+    borderRadius: '8px',
+    background: 'rgba(255,255,255,0.04)',
+    borderLeft: '3px solid #238636',
   },
-  cartItemInfo: {
+  orderItemTop: {
     display: 'flex',
-    justifyContent: 'space-between',
-    marginBottom: '6px',
+    alignItems: 'flex-start',
+    gap: '10px',
   },
-  cartItemName: {
-    fontSize: '14px',
-    fontWeight: '500',
-    color: '#333',
-  },
-  cartItemPrice: {
-    fontSize: '14px',
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-  },
-  cartItemActions: {
+  orderItemQty: {
     display: 'flex',
     alignItems: 'center',
-    gap: '8px',
+    gap: '4px',
   },
-  qtyBtn: {
-    width: '30px',
-    height: '30px',
-    border: '1px solid #ddd',
-    borderRadius: '6px',
-    background: '#f9f9f9',
+  qtyBtnSmall: {
+    width: '24px',
+    height: '24px',
+    border: '1px solid #30363d',
+    borderRadius: '4px',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#e6edf3',
     cursor: 'pointer',
-    fontSize: '16px',
+    fontSize: '14px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     fontWeight: 'bold',
   },
-  qtyDisplay: {
-    fontSize: '15px',
+  qtyNum: {
+    fontSize: '14px',
     fontWeight: 'bold',
-    minWidth: '24px',
+    minWidth: '20px',
     textAlign: 'center',
+    color: '#e6edf3',
   },
-  deleteBtn: {
-    marginLeft: 'auto',
+  orderItemDetails: {
+    flex: 1,
+    minWidth: 0,
+  },
+  orderItemName: {
+    fontSize: '14px',
+    fontWeight: '600',
+    color: '#e6edf3',
+  },
+  orderItemCustom: {
+    fontSize: '11px',
+    color: '#8b949e',
+    marginTop: '2px',
+    lineHeight: '1.3',
+  },
+  orderItemPrice: {
+    fontSize: '14px',
+    fontWeight: 'bold',
+    color: '#e6edf3',
+    whiteSpace: 'nowrap',
+  },
+  removeBtn: {
     border: 'none',
     background: 'none',
+    color: '#f85149',
     cursor: 'pointer',
-    fontSize: '16px',
-    padding: '4px',
+    fontSize: '18px',
+    padding: '0 4px',
+    lineHeight: '1',
   },
-  totalsSection: {
-    padding: '12px 20px',
-    borderTop: '1px solid #e0e0e0',
-    background: '#fafafa',
+
+  // Order Totals
+  orderTotals: {
+    padding: '12px 16px',
+    borderTop: '1px solid #30363d',
+    background: 'rgba(255,255,255,0.02)',
   },
-  totalRow: {
+  totalLine: {
     display: 'flex',
     justifyContent: 'space-between',
-    padding: '4px 0',
+    padding: '3px 0',
     fontSize: '13px',
-    color: '#666',
+    color: '#8b949e',
   },
-  totalRowBig: {
+  totalLineMain: {
     display: 'flex',
     justifyContent: 'space-between',
     padding: '8px 0 0',
     fontSize: '20px',
     fontWeight: 'bold',
-    color: '#1a1a2e',
-    borderTop: '1px solid #e0e0e0',
+    color: '#fff',
+    borderTop: '1px solid #30363d',
     marginTop: '6px',
   },
-  actionButtons: {
+
+  // Order Actions
+  orderActions: {
     display: 'flex',
-    gap: '10px',
-    padding: '16px 20px',
-    borderTop: '1px solid #e0e0e0',
+    gap: '8px',
+    padding: '12px 16px',
+    borderTop: '1px solid #30363d',
   },
-  clearBtn: {
-    padding: '14px 20px',
-    border: '1px solid #ddd',
-    borderRadius: '10px',
-    background: '#fff',
+  clearOrderBtn: {
+    padding: '12px 16px',
+    border: '1px solid #30363d',
+    borderRadius: '8px',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#8b949e',
     cursor: 'pointer',
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '600',
-    color: '#666',
   },
-  payBtn: {
+  checkoutBtn: {
     flex: 1,
-    padding: '14px 20px',
+    padding: '12px 16px',
     border: 'none',
-    borderRadius: '10px',
-    background: '#e74c3c',
+    borderRadius: '8px',
+    background: '#238636',
     color: '#fff',
     cursor: 'pointer',
-    fontSize: '16px',
+    fontSize: '15px',
     fontWeight: 'bold',
-    transition: 'all 0.2s',
+    transition: 'all 0.15s',
   },
+
+  // ===== MIDDLE: CATEGORIES =====
+  categoryPanel: {
+    width: '160px',
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#161b22',
+    borderRight: '1px solid #30363d',
+  },
+  searchBoxDark: {
+    position: 'relative',
+    padding: '12px 10px',
+    borderBottom: '1px solid #30363d',
+  },
+  searchInputDark: {
+    width: '100%',
+    padding: '8px 10px',
+    border: '1px solid #30363d',
+    borderRadius: '6px',
+    background: '#0d1117',
+    color: '#e6edf3',
+    fontSize: '12px',
+    outline: 'none',
+    boxSizing: 'border-box',
+  },
+  clearSearchDark: {
+    position: 'absolute',
+    right: '14px',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    border: 'none',
+    background: 'none',
+    color: '#8b949e',
+    cursor: 'pointer',
+    fontSize: '16px',
+  },
+  categoryList: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '8px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '4px',
+  },
+  categoryBtn: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    padding: '12px 8px',
+    border: '2px solid transparent',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    transition: 'all 0.15s',
+    textAlign: 'center',
+    position: 'relative',
+  },
+  catEmoji: {
+    fontSize: '22px',
+    marginBottom: '4px',
+  },
+  catLabel: {
+    fontSize: '11px',
+    fontWeight: '600',
+    lineHeight: '1.2',
+  },
+  catCount: {
+    position: 'absolute',
+    top: '4px',
+    right: '4px',
+    fontSize: '10px',
+    background: 'rgba(0,0,0,0.4)',
+    borderRadius: '8px',
+    padding: '1px 5px',
+    color: '#8b949e',
+  },
+
+  // ===== RIGHT: PRODUCTS =====
+  productPanel: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    background: '#0d1117',
+    overflow: 'hidden',
+  },
+  productHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '16px 20px',
+    borderBottom: '1px solid #30363d',
+  },
+  productTitle: {
+    margin: 0,
+    fontSize: '18px',
+    fontWeight: 'bold',
+    color: '#e6edf3',
+  },
+  productCount: {
+    fontSize: '13px',
+    color: '#8b949e',
+  },
+  productGrid: {
+    flex: 1,
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+    gap: '10px',
+    padding: '16px 20px',
+    overflowY: 'auto',
+    alignContent: 'start',
+  },
+  emptyProducts: {
+    gridColumn: '1 / -1',
+    textAlign: 'center',
+    padding: '40px',
+    color: '#484f58',
+    fontSize: '15px',
+  },
+  productBtn: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '18px 12px',
+    border: '2px solid #30363d',
+    borderRadius: '10px',
+    background: '#161b22',
+    cursor: 'pointer',
+    transition: 'all 0.12s',
+    minHeight: '90px',
+    textAlign: 'center',
+    color: '#e6edf3',
+    borderTopStyle: 'solid',
+  },
+  productName: {
+    fontSize: '13px',
+    fontWeight: '600',
+    marginBottom: '6px',
+    color: '#e6edf3',
+    lineHeight: '1.2',
+  },
+  productPrice: {
+    fontSize: '15px',
+    fontWeight: 'bold',
+    color: '#f0883e',
+  },
+  productBadge: {
+    position: 'absolute',
+    top: '-8px',
+    right: '-8px',
+    width: '24px',
+    height: '24px',
+    borderRadius: '50%',
+    background: '#238636',
+    color: '#fff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '12px',
+    fontWeight: 'bold',
+  },
+
+  // ===== MODALS =====
   modalOverlay: {
     position: 'fixed',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    background: 'rgba(0,0,0,0.6)',
+    background: 'rgba(0,0,0,0.75)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
   },
-  paymentModal: {
-    background: '#fff',
-    borderRadius: '20px',
-    padding: '32px',
-    width: '420px',
-    textAlign: 'center',
+
+  // Customization Modal
+  customModal: {
+    background: '#161b22',
+    borderRadius: '16px',
+    border: '1px solid #30363d',
+    width: '520px',
+    maxHeight: '85vh',
+    display: 'flex',
+    flexDirection: 'column',
   },
-  modalTitle: {
-    margin: '0 0 20px',
-    fontSize: '24px',
-    fontWeight: 'bold',
-    color: '#1a1a2e',
-  },
-  modalTotal: {
+  customHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: '16px',
-    background: '#f9f9f9',
+    padding: '20px 24px',
+    borderBottom: '1px solid #30363d',
+  },
+  customTitle: {
+    margin: 0,
+    fontSize: '20px',
+    fontWeight: 'bold',
+    color: '#e6edf3',
+  },
+  customPrice: {
+    fontSize: '20px',
+    fontWeight: 'bold',
+    color: '#f0883e',
+  },
+  customBody: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '16px 24px',
+  },
+  customGroup: {
+    marginBottom: '20px',
+  },
+  customGroupTitle: {
+    margin: '0 0 10px',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: '#e6edf3',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px',
+  },
+  customGroupType: {
+    marginLeft: '8px',
+    fontSize: '11px',
+    fontWeight: '400',
+    color: '#8b949e',
+    textTransform: 'none',
+    letterSpacing: '0',
+  },
+  customOptions: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px',
+  },
+  customOptionBtn: {
+    padding: '10px 16px',
+    border: '2px solid rgba(255,255,255,0.15)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: '500',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    transition: 'all 0.12s',
+  },
+  optionPrice: {
+    fontSize: '11px',
+    opacity: 0.8,
+    fontWeight: '600',
+  },
+  customFooter: {
+    display: 'flex',
+    gap: '10px',
+    padding: '16px 24px',
+    borderTop: '1px solid #30363d',
+  },
+  customCancelBtn: {
+    padding: '12px 20px',
+    border: '1px solid #30363d',
+    borderRadius: '8px',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#8b949e',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600',
+  },
+  customAddBtn: {
+    flex: 1,
+    padding: '12px 20px',
+    border: 'none',
+    borderRadius: '8px',
+    background: '#238636',
+    color: '#fff',
+    cursor: 'pointer',
+    fontSize: '15px',
+    fontWeight: 'bold',
+  },
+
+  // Payment Modal
+  paymentModal: {
+    background: '#161b22',
+    borderRadius: '16px',
+    border: '1px solid #30363d',
+    padding: '32px',
+    width: '440px',
+    textAlign: 'center',
+  },
+  payModalTitle: {
+    margin: '0 0 20px',
+    fontSize: '22px',
+    fontWeight: 'bold',
+    color: '#e6edf3',
+  },
+  payTotal: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '16px 20px',
+    background: 'rgba(255,255,255,0.04)',
     borderRadius: '12px',
     marginBottom: '24px',
-    fontSize: '16px',
   },
-  modalAmount: {
+  payTotalLabel: {
+    fontSize: '15px',
+    color: '#8b949e',
+  },
+  payTotalAmount: {
     fontSize: '28px',
     fontWeight: 'bold',
-    color: '#e74c3c',
+    color: '#f0883e',
   },
-  paymentMethods: {
+  payMethods: {
     display: 'flex',
-    gap: '16px',
+    gap: '12px',
     marginBottom: '20px',
   },
   payMethodBtn: {
@@ -721,29 +1347,171 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: '8px',
-    padding: '20px',
-    border: '2px solid #e0e0e0',
-    borderRadius: '14px',
-    background: '#fff',
+    gap: '10px',
+    padding: '20px 12px',
+    border: '2px solid #30363d',
+    borderRadius: '12px',
+    background: 'rgba(255,255,255,0.04)',
     cursor: 'pointer',
-    fontSize: '15px',
-    fontWeight: '600',
-    transition: 'all 0.2s',
+    transition: 'all 0.15s',
+    color: '#e6edf3',
   },
-  cancelBtn: {
-    padding: '12px 24px',
-    border: '1px solid #ddd',
-    borderRadius: '10px',
-    background: '#fff',
+  payMethodLabel: {
+    fontSize: '14px',
+    fontWeight: '600',
+  },
+  payCancelBtn: {
+    padding: '10px 24px',
+    border: '1px solid #30363d',
+    borderRadius: '8px',
+    background: 'rgba(255,255,255,0.05)',
+    color: '#8b949e',
     cursor: 'pointer',
     fontSize: '14px',
-    color: '#666',
   },
-  receiptModal: {
-    background: '#fff',
-    borderRadius: '20px',
+
+  // Cash Modal
+  cashModal: {
+    background: '#161b22',
+    borderRadius: '16px',
+    border: '1px solid #30363d',
     padding: '32px',
+    width: '440px',
+  },
+  cashTotalRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '12px 16px',
+    background: 'rgba(255,255,255,0.04)',
+    borderRadius: '10px',
+    marginBottom: '20px',
+    fontSize: '15px',
+    color: '#8b949e',
+  },
+  cashTotalAmount: {
+    fontSize: '22px',
+    fontWeight: 'bold',
+    color: '#f0883e',
+  },
+  cashQuickBtns: {
+    display: 'flex',
+    gap: '8px',
+    marginBottom: '20px',
+    flexWrap: 'wrap',
+  },
+  cashQuickBtn: {
+    flex: 1,
+    minWidth: '60px',
+    padding: '12px 8px',
+    border: '2px solid #30363d',
+    borderRadius: '8px',
+    background: 'rgba(255,255,255,0.06)',
+    color: '#e6edf3',
+    cursor: 'pointer',
+    fontSize: '15px',
+    fontWeight: 'bold',
+    transition: 'all 0.12s',
+  },
+  cashQuickBtnExact: {
+    flex: 1,
+    minWidth: '60px',
+    padding: '12px 8px',
+    border: '2px solid #238636',
+    borderRadius: '8px',
+    background: 'rgba(35,134,54,0.15)',
+    color: '#3fb950',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: 'bold',
+  },
+  cashInputRow: {
+    marginBottom: '16px',
+  },
+  cashInputLabel: {
+    display: 'block',
+    fontSize: '13px',
+    color: '#8b949e',
+    marginBottom: '6px',
+  },
+  cashInputWrapper: {
+    display: 'flex',
+    alignItems: 'center',
+    border: '2px solid #30363d',
+    borderRadius: '8px',
+    background: '#0d1117',
+    overflow: 'hidden',
+  },
+  cashEuro: {
+    padding: '12px 14px',
+    fontSize: '18px',
+    fontWeight: 'bold',
+    color: '#8b949e',
+    background: 'rgba(255,255,255,0.04)',
+    borderRight: '1px solid #30363d',
+  },
+  cashInput: {
+    flex: 1,
+    padding: '12px 14px',
+    border: 'none',
+    background: 'transparent',
+    color: '#e6edf3',
+    fontSize: '20px',
+    fontWeight: 'bold',
+    outline: 'none',
+  },
+  changeBox: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: '14px 18px',
+    background: 'rgba(35,134,54,0.12)',
+    border: '1px solid rgba(35,134,54,0.3)',
+    borderRadius: '10px',
+    marginBottom: '20px',
+  },
+  changeLabel: {
+    fontSize: '14px',
+    color: '#8b949e',
+  },
+  changeAmount: {
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#3fb950',
+  },
+  changeBoxError: {
+    padding: '12px 18px',
+    background: 'rgba(248,81,73,0.1)',
+    border: '1px solid rgba(248,81,73,0.3)',
+    borderRadius: '10px',
+    marginBottom: '20px',
+    color: '#f85149',
+    fontSize: '13px',
+    textAlign: 'center',
+  },
+  cashActions: {
+    display: 'flex',
+    gap: '10px',
+  },
+  cashConfirmBtn: {
+    flex: 1,
+    padding: '14px',
+    border: 'none',
+    borderRadius: '8px',
+    background: '#238636',
+    color: '#fff',
+    fontSize: '16px',
+    fontWeight: 'bold',
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+  },
+
+  // Receipt Modal
+  receiptModal: {
+    background: '#161b22',
+    borderRadius: '16px',
+    border: '1px solid #30363d',
+    padding: '28px',
     width: '380px',
   },
   receiptContent: {
@@ -757,12 +1525,13 @@ const styles = {
     display: 'inline-block',
     marginTop: '8px',
     padding: '4px 12px',
-    background: '#f0f0f0',
+    background: 'rgba(255,255,255,0.08)',
     borderRadius: '20px',
-    fontSize: '14px',
+    fontSize: '13px',
+    color: '#8b949e',
   },
   receiptDivider: {
-    borderTop: '1px dashed #ddd',
+    borderTop: '1px dashed #30363d',
     margin: '12px 0',
   },
   receiptItem: {
@@ -770,13 +1539,20 @@ const styles = {
     justifyContent: 'space-between',
     padding: '4px 0',
     fontSize: '14px',
+    color: '#8b949e',
+  },
+  receiptCustom: {
+    fontSize: '11px',
+    color: '#484f58',
+    paddingLeft: '20px',
+    paddingBottom: '2px',
   },
   receiptCloseBtn: {
     width: '100%',
     padding: '14px',
     border: 'none',
     borderRadius: '10px',
-    background: '#27ae60',
+    background: '#238636',
     color: '#fff',
     fontSize: '16px',
     fontWeight: 'bold',
