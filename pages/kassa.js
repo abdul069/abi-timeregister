@@ -12,6 +12,9 @@ import {
   getParkedOrders,
   parkOrder,
   recallParkedOrder,
+  getPendingIncomingOrders,
+  acceptIncomingOrder,
+  rejectIncomingOrder,
 } from '../lib/pos-data';
 
 export default function Kassa() {
@@ -64,6 +67,11 @@ export default function Kassa() {
   const [numpadValue, setNumpadValue] = useState('');
   const [numpadTarget, setNumpadTarget] = useState(null);
 
+  // Incoming platform orders (Takeaway.com)
+  const [incomingOrders, setIncomingOrders] = useState([]);
+  const [showIncoming, setShowIncoming] = useState(false);
+  const [rejectReason, setRejectReason] = useState('');
+
   useEffect(() => {
     async function loadData() {
       const [cats, items, groups, links, parked] = await Promise.all([
@@ -89,7 +97,18 @@ export default function Kassa() {
     const clockInterval = setInterval(() => {
       setCurrentTime(new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }));
     }, 1000);
-    return () => clearInterval(clockInterval);
+
+    // Poll for incoming delivery platform orders
+    const checkIncoming = async () => {
+      try {
+        const pending = await getPendingIncomingOrders();
+        setIncomingOrders(pending);
+      } catch (e) { /* ignore */ }
+    };
+    checkIncoming();
+    const incomingInterval = setInterval(checkIncoming, 10000);
+
+    return () => { clearInterval(clockInterval); clearInterval(incomingInterval); };
   }, []);
 
   const filteredItems = menuItems.filter(item => {
@@ -374,8 +393,76 @@ export default function Kassa() {
     }
   };
 
+  const handleAcceptIncoming = async (order) => {
+    const staffId = currentStaff?.id || 'system';
+    await acceptIncomingOrder(order._docId, staffId);
+    setIncomingOrders(prev => prev.filter(o => o._docId !== order._docId));
+  };
+
+  const handleRejectIncoming = async (order) => {
+    const staffId = currentStaff?.id || 'system';
+    await rejectIncomingOrder(order._docId, rejectReason || 'Te druk', staffId);
+    setIncomingOrders(prev => prev.filter(o => o._docId !== order._docId));
+    setRejectReason('');
+  };
+
   return (
     <div style={st.container}>
+      {/* Incoming Platform Orders Banner */}
+      {incomingOrders.length > 0 && (
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 900, background: '#FF8000', padding: '8px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', animation: 'pulse 1s infinite' }}>
+          <span style={{ fontWeight: 'bold', color: '#fff', fontSize: '14px' }}>
+            🟠 {incomingOrders.length} nieuwe Takeaway bestelling{incomingOrders.length > 1 ? 'en' : ''}!
+          </span>
+          <button onClick={() => setShowIncoming(true)} style={{ padding: '6px 16px', border: 'none', borderRadius: '6px', background: '#fff', color: '#FF8000', fontWeight: 'bold', cursor: 'pointer', fontSize: '13px' }}>
+            Bekijk &amp; Accepteer
+          </button>
+        </div>
+      )}
+
+      {/* Incoming Orders Modal */}
+      {showIncoming && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={() => setShowIncoming(false)}>
+          <div style={{ background: '#161b22', border: '1px solid #30363d', borderRadius: '16px', padding: '24px', width: '600px', maxWidth: '95vw', maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ margin: '0 0 16px', color: '#e6edf3', fontSize: '18px' }}>🟠 Inkomende Bestellingen ({incomingOrders.length})</h2>
+            {incomingOrders.map(order => (
+              <div key={order._docId} style={{ background: '#0d1117', border: '1px solid #FF800040', borderRadius: '12px', padding: '16px', marginBottom: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <div>
+                    <span style={{ fontWeight: 'bold', color: '#e6edf3' }}>#{order.platformOrderId}</span>
+                    <span style={{ marginLeft: '8px', padding: '2px 8px', borderRadius: '4px', background: '#FF800020', color: '#FF8000', fontSize: '11px' }}>{order.platform}</span>
+                  </div>
+                  <span style={{ fontWeight: 'bold', color: '#3fb950', fontSize: '18px' }}>{formatPrice(order.total || 0)}</span>
+                </div>
+                {order.customerName && <div style={{ fontSize: '13px', color: '#8b949e', marginBottom: '4px' }}>👤 {order.customerName}</div>}
+                {order.customerAddress && <div style={{ fontSize: '13px', color: '#8b949e', marginBottom: '4px' }}>📍 {order.customerAddress}</div>}
+                {order.customerPhone && <div style={{ fontSize: '13px', color: '#8b949e', marginBottom: '4px' }}>📞 {order.customerPhone}</div>}
+                {order.deliveryNotes && <div style={{ fontSize: '13px', color: '#d29922', marginBottom: '4px' }}>📝 {order.deliveryNotes}</div>}
+                <div style={{ margin: '8px 0', borderTop: '1px solid #21262d', paddingTop: '8px' }}>
+                  {(order.items || []).map((item, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#e6edf3', padding: '2px 0' }}>
+                      <span>{item.quantity}x {item.name}</span>
+                      <span>{formatPrice(item.price * item.quantity)}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button onClick={() => handleAcceptIncoming(order)} style={{ flex: 1, padding: '10px', border: 'none', borderRadius: '8px', background: '#238636', color: '#fff', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+                    ✅ Accepteren
+                  </button>
+                  <button onClick={() => handleRejectIncoming(order)} style={{ flex: 1, padding: '10px', border: '1px solid #f85149', borderRadius: '8px', background: 'transparent', color: '#f85149', fontWeight: 'bold', cursor: 'pointer', fontSize: '14px' }}>
+                    ❌ Weigeren
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button onClick={() => setShowIncoming(false)} style={{ width: '100%', padding: '10px', border: '1px solid #30363d', borderRadius: '8px', background: 'transparent', color: '#8b949e', cursor: 'pointer', fontSize: '14px', marginTop: '8px' }}>
+              Sluiten
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* LEFT: Order Panel */}
       <div style={st.orderPanel}>
         {/* Staff & Time header */}
