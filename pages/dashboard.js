@@ -1,7 +1,8 @@
-'use client';
-
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import { auth, db } from '../lib/firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, collection, addDoc, getDocs, query, where, orderBy } from 'firebase/firestore';
 
 const Dashboard = () => {
   const [currentUser, setCurrentUser] = useState(null);
@@ -12,26 +13,41 @@ const Dashboard = () => {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  // Load user data on mount
   useEffect(() => {
-    const user = localStorage.getItem('currentUser');
-    if (!user) {
-      router.push('/');
-      return;
-    }
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        router.push('/');
+        return;
+      }
+      setCurrentUser(user);
 
-    const userData = JSON.parse(user);
-    setCurrentUser(userData);
+      // Load attendance log for this user
+      try {
+        const snap = await getDocs(
+          query(
+            collection(db, 'attendance'),
+            where('userId', '==', user.uid),
+            orderBy('timestamp', 'desc')
+          )
+        );
+        setAttendanceLog(snap.docs.map(d => d.data()));
+      } catch (err) {
+        console.error('Error loading attendance:', err);
+      }
 
-    // Load existing attendance log
-    const log = localStorage.getItem('attendanceLog') || '[]';
-    setAttendanceLog(JSON.parse(log));
+      // Load restaurant name
+      try {
+        const settingsSnap = await getDoc(doc(db, 'users', user.uid));
+        if (settingsSnap.exists()) {
+          setRestaurantName(settingsSnap.data().restaurantName || '');
+        }
+      } catch (err) {
+        console.error('Error loading settings:', err);
+      }
 
-    // Load restaurant name
-    const restaurant = localStorage.getItem('restaurantName') || '';
-    setRestaurantName(restaurant);
-
-    setLoading(false);
+      setLoading(false);
+    });
+    return () => unsubscribe();
   }, [router]);
 
   const handleStartWork = () => {
@@ -40,39 +56,49 @@ const Dashboard = () => {
     setWorkStarted(true);
   };
 
-  const handleEndWork = () => {
+  const handleEndWork = async () => {
     if (!startTime) return;
 
     const endTime = new Date();
-    const hoursWorked = Math.round((endTime - startTime) / (1000 * 60 * 60) * 2) / 2; // Round to nearest 0.5 hour
+    const hoursWorked = Math.round((endTime - startTime) / (1000 * 60 * 60) * 2) / 2;
 
     const newRecord = {
+      userId: currentUser.uid,
       date: new Date().toISOString().split('T')[0],
       startTime: startTime.toLocaleTimeString(),
       endTime: endTime.toLocaleTimeString(),
       hoursWorked: hoursWorked,
       restaurant: restaurantName || 'Default',
+      timestamp: Date.now(),
     };
 
-    const updatedLog = [...attendanceLog, newRecord];
-    localStorage.setItem('attendanceLog', JSON.stringify(updatedLog));
-    setAttendanceLog(updatedLog);
+    try {
+      await addDoc(collection(db, 'attendance'), newRecord);
+      setAttendanceLog(prev => [newRecord, ...prev]);
+    } catch (err) {
+      console.error('Error saving attendance:', err);
+    }
+
     setWorkStarted(false);
     setStartTime(null);
   };
 
-  const handleSaveRestaurant = () => {
-    localStorage.setItem('restaurantName', restaurantName);
-    alert('Restaurant name saved!');
+  const handleSaveRestaurant = async () => {
+    try {
+      await setDoc(doc(db, 'users', currentUser.uid), { restaurantName }, { merge: true });
+      alert('Restaurantnaam opgeslagen!');
+    } catch (err) {
+      console.error('Error saving restaurant:', err);
+    }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('currentUser');
+  const handleLogout = async () => {
+    await signOut(auth);
     router.push('/');
   };
 
   if (loading) {
-    return <div style={{ padding: '20px' }}>Loading...</div>;
+    return <div style={{ padding: '20px' }}>Laden...</div>;
   }
 
   return (
@@ -102,7 +128,7 @@ const Dashboard = () => {
           <div>
             <h1 style={{ margin: '0 0 5px 0' }}>ABI TimeRegister</h1>
             <p style={{ margin: '0', color: '#666' }}>
-              Welcome, {currentUser?.email}
+              Welkom, {currentUser?.email}
             </p>
           </div>
           <button
@@ -117,7 +143,7 @@ const Dashboard = () => {
               fontSize: '14px',
             }}
           >
-            Logout
+            Uitloggen
           </button>
         </div>
 
@@ -128,13 +154,13 @@ const Dashboard = () => {
           backgroundColor: '#f9f9f9',
           borderRadius: '4px',
         }}>
-          <h3 style={{ marginTop: '0' }}>Restaurant/Location</h3>
+          <h3 style={{ marginTop: '0' }}>Restaurant/Locatie</h3>
           <div style={{ display: 'flex', gap: '10px' }}>
             <input
               type="text"
               value={restaurantName}
               onChange={(e) => setRestaurantName(e.target.value)}
-              placeholder="Enter restaurant/location name"
+              placeholder="Voer restaurant/locatienaam in"
               style={{
                 flex: '1',
                 padding: '10px',
@@ -153,7 +179,7 @@ const Dashboard = () => {
                 cursor: 'pointer',
               }}
             >
-              Save
+              Opslaan
             </button>
           </div>
         </div>
@@ -166,7 +192,7 @@ const Dashboard = () => {
           borderRadius: '4px',
           textAlign: 'center',
         }}>
-          <h3 style={{ marginTop: '0' }}>Work Session</h3>
+          <h3 style={{ marginTop: '0' }}>Werksessie</h3>
           {!workStarted ? (
             <button
               onClick={handleStartWork}
@@ -180,12 +206,12 @@ const Dashboard = () => {
                 cursor: 'pointer',
               }}
             >
-              Start Work
+              Start Werk
             </button>
           ) : (
             <div>
               <p style={{ color: '#28a745', fontSize: '16px', fontWeight: 'bold' }}>
-                ⏱️ Work Session Active
+                Werksessie Actief
               </p>
               <button
                 onClick={handleEndWork}
@@ -199,7 +225,7 @@ const Dashboard = () => {
                   cursor: 'pointer',
                 }}
               >
-                End Work
+                Stop Werk
               </button>
             </div>
           )}
@@ -207,9 +233,9 @@ const Dashboard = () => {
 
         {/* Attendance Log */}
         <div>
-          <h3>Attendance Log</h3>
+          <h3>Aanwezigheidslog</h3>
           {attendanceLog.length === 0 ? (
-            <p style={{ color: '#666' }}>No work sessions recorded yet.</p>
+            <p style={{ color: '#666' }}>Nog geen werksessies geregistreerd.</p>
           ) : (
             <table style={{
               width: '100%',
@@ -218,11 +244,11 @@ const Dashboard = () => {
             }}>
               <thead>
                 <tr style={{ backgroundColor: '#f0f0f0', borderBottom: '2px solid #ddd' }}>
-                  <th style={{ padding: '10px', textAlign: 'left' }}>Date</th>
-                  <th style={{ padding: '10px', textAlign: 'left' }}>Start Time</th>
-                  <th style={{ padding: '10px', textAlign: 'left' }}>End Time</th>
-                  <th style={{ padding: '10px', textAlign: 'left' }}>Hours</th>
-                  <th style={{ padding: '10px', textAlign: 'left' }}>Location</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Datum</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Starttijd</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Eindtijd</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Uren</th>
+                  <th style={{ padding: '10px', textAlign: 'left' }}>Locatie</th>
                 </tr>
               </thead>
               <tbody>
@@ -237,7 +263,7 @@ const Dashboard = () => {
                     <td style={{ padding: '10px' }}>{record.date}</td>
                     <td style={{ padding: '10px' }}>{record.startTime}</td>
                     <td style={{ padding: '10px' }}>{record.endTime}</td>
-                    <td style={{ padding: '10px' }}>{record.hoursWorked}h</td>
+                    <td style={{ padding: '10px' }}>{record.hoursWorked}u</td>
                     <td style={{ padding: '10px' }}>{record.restaurant}</td>
                   </tr>
                 ))}

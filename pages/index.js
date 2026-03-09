@@ -1,8 +1,7 @@
-'use client';
-
 import React, { useState } from 'react';
 import { useRouter } from 'next/router';
-import styles from '../styles/globals.css';
+import { auth } from '../lib/firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
 const Home = () => {
   const [email, setEmail] = useState('');
@@ -12,7 +11,6 @@ const Home = () => {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
-  // Handle login/signup with localStorage
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
@@ -20,50 +18,28 @@ const Home = () => {
 
     try {
       if (!email || !password) {
-        setError('Please fill in all fields');
+        setError('Vul alle velden in');
         setLoading(false);
         return;
       }
 
       if (isSignup) {
-        // Signup: create new user
-        const existingUsers = JSON.parse(localStorage.getItem('users') || '[]');
-        const userExists = existingUsers.find(u => u.email === email);
-        
-        if (userExists) {
-          setError('User already exists');
-          setLoading(false);
-          return;
-        }
-
-        const newUser = {
-          email,
-          password, // In production, this should be hashed
-          createdAt: new Date().toISOString(),
-        };
-
-        existingUsers.push(newUser);
-        localStorage.setItem('users', JSON.stringify(existingUsers));
-        localStorage.setItem('currentUser', JSON.stringify({ email }));
-        setLoading(false);
-        router.push('/dashboard');
+        await createUserWithEmailAndPassword(auth, email, password);
       } else {
-        // Login: verify credentials
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const user = users.find(u => u.email === email && u.password === password);
-
-        if (!user) {
-          setError('Invalid email or password');
-          setLoading(false);
-          return;
-        }
-
-        localStorage.setItem('currentUser', JSON.stringify({ email }));
-        setLoading(false);
-        router.push('/dashboard');
+        await signInWithEmailAndPassword(auth, email, password);
       }
+      router.push('/pos');
     } catch (err) {
-      setError(err.message || 'An error occurred');
+      const messages = {
+        'auth/email-already-in-use': 'Dit e-mailadres is al in gebruik',
+        'auth/invalid-email': 'Ongeldig e-mailadres',
+        'auth/weak-password': 'Wachtwoord moet minimaal 6 tekens zijn',
+        'auth/user-not-found': 'Geen account gevonden met dit e-mailadres',
+        'auth/wrong-password': 'Onjuist wachtwoord',
+        'auth/invalid-credential': 'Ongeldige inloggegevens',
+      };
+      setError(messages[err.code] || err.message);
+    } finally {
       setLoading(false);
     }
   };
@@ -84,11 +60,14 @@ const Home = () => {
         width: '100%',
         maxWidth: '400px',
       }}>
-        <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>
-          ABI TimeRegister
+        <h1 style={{ textAlign: 'center', marginBottom: '10px' }}>
+          FastFood POS
         </h1>
+        <p style={{ textAlign: 'center', marginBottom: '30px', color: '#888', fontSize: '14px' }}>
+          Kassasysteem
+        </p>
         <h2 style={{ textAlign: 'center', fontSize: '18px', marginBottom: '30px' }}>
-          {isSignup ? 'Create Account' : 'Login'}
+          {isSignup ? 'Account Aanmaken' : 'Inloggen'}
         </h2>
 
         {error && (
@@ -114,7 +93,7 @@ const Home = () => {
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="Enter your email"
+              placeholder="Voer je e-mail in"
               style={{
                 width: '100%',
                 padding: '10px',
@@ -128,14 +107,14 @@ const Home = () => {
 
           <div style={{ marginBottom: '20px' }}>
             <label htmlFor="password" style={{ display: 'block', marginBottom: '5px' }}>
-              Password
+              Wachtwoord
             </label>
             <input
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter your password"
+              placeholder="Voer je wachtwoord in"
               style={{
                 width: '100%',
                 padding: '10px',
@@ -162,7 +141,7 @@ const Home = () => {
               marginBottom: '15px',
             }}
           >
-            {loading ? 'Loading...' : (isSignup ? 'Sign Up' : 'Login')}
+            {loading ? 'Laden...' : (isSignup ? 'Registreren' : 'Inloggen')}
           </button>
         </form>
 
@@ -182,17 +161,8 @@ const Home = () => {
             cursor: 'pointer',
           }}
         >
-          {isSignup ? 'Already have account? Login' : "Don't have account? Sign Up"}
+          {isSignup ? 'Al een account? Inloggen' : "Geen account? Registreren"}
         </button>
-
-        <p style={{
-          textAlign: 'center',
-          marginTop: '20px',
-          fontSize: '12px',
-          color: '#666',
-        }}>
-          Demo Account: test@example.com / password123
-        </p>
       </div>
     </div>
   );
