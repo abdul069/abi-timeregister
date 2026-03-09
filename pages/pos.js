@@ -1,6 +1,8 @@
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
-import { getTodayOrders, getOrders, formatPrice, resetDailyCounter } from '../lib/pos-data';
+import { getTodayOrders, formatPrice, resetDailyCounter } from '../lib/pos-data';
+import { auth } from '../lib/firebase';
+import { signOut } from 'firebase/auth';
 
 export default function PosHome() {
   const router = useRouter();
@@ -8,8 +10,8 @@ export default function PosHome() {
   const [currentTime, setCurrentTime] = useState('');
 
   useEffect(() => {
-    const updateStats = () => {
-      const todayOrders = getTodayOrders();
+    const updateStats = async () => {
+      const todayOrders = await getTodayOrders();
       setStats({
         todayOrders: todayOrders.length,
         todayRevenue: todayOrders.reduce((sum, o) => sum + o.total, 0),
@@ -17,7 +19,7 @@ export default function PosHome() {
       });
     };
     updateStats();
-    const interval = setInterval(updateStats, 5000);
+    const interval = setInterval(updateStats, 10000);
 
     const clockInterval = setInterval(() => {
       setCurrentTime(new Date().toLocaleString('nl-NL', {
@@ -33,6 +35,11 @@ export default function PosHome() {
 
     return () => { clearInterval(interval); clearInterval(clockInterval); };
   }, []);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+    router.push('/');
+  };
 
   const tiles = [
     {
@@ -130,12 +137,12 @@ export default function PosHome() {
       <div style={styles.footer}>
         <span>FastFood POS Systeem v1.0</span>
         <button
-          onClick={() => { if (confirm('Weet je zeker dat je de dagteller wilt resetten?')) resetDailyCounter(); }}
+          onClick={async () => { if (confirm('Weet je zeker dat je de dagteller wilt resetten?')) await resetDailyCounter(); }}
           style={styles.resetBtn}
         >
           Reset Dagteller
         </button>
-        <button onClick={() => router.push('/')} style={styles.logoutBtn}>
+        <button onClick={handleLogout} style={styles.logoutBtn}>
           Uitloggen
         </button>
       </div>

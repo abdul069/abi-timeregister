@@ -16,10 +16,15 @@ export default function MenuBeheer() {
   const [editingItem, setEditingItem] = useState(null);
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState({ name: '', price: '', category: 'burgers', available: true });
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setCategories(getCategories());
-    setMenuItems(getMenuItems());
+    async function loadData() {
+      const [cats, items] = await Promise.all([getCategories(), getMenuItems()]);
+      setCategories(cats);
+      setMenuItems(items);
+    }
+    loadData();
   }, []);
 
   const filteredItems = menuItems.filter(i => i.category === activeCategory);
@@ -36,50 +41,59 @@ export default function MenuBeheer() {
     setShowForm(true);
   };
 
-  const saveItem = () => {
+  const saveItem = async () => {
     const price = parseFloat(formData.price);
     if (!formData.name.trim() || isNaN(price) || price < 0) return;
+    if (saving) return;
+    setSaving(true);
 
-    let updated;
-    if (editingItem) {
-      updated = menuItems.map(i =>
-        i.id === editingItem.id
-          ? { ...i, name: formData.name.trim(), price, category: formData.category, available: formData.available }
-          : i
-      );
-    } else {
-      const newId = Math.max(0, ...menuItems.map(i => i.id)) + 1;
-      updated = [...menuItems, {
-        id: newId,
-        name: formData.name.trim(),
-        price,
-        category: formData.category,
-        available: formData.available,
-      }];
+    try {
+      let updated;
+      if (editingItem) {
+        updated = menuItems.map(i =>
+          i.id === editingItem.id
+            ? { ...i, name: formData.name.trim(), price, category: formData.category, available: formData.available }
+            : i
+        );
+      } else {
+        const newId = Math.max(0, ...menuItems.map(i => i.id)) + 1;
+        updated = [...menuItems, {
+          id: newId,
+          name: formData.name.trim(),
+          price,
+          category: formData.category,
+          available: formData.available,
+        }];
+      }
+
+      await saveMenuItems(updated);
+      setMenuItems(updated);
+      setShowForm(false);
+      setEditingItem(null);
+    } catch (err) {
+      console.error('Error saving item:', err);
+      alert('Fout bij opslaan. Probeer opnieuw.');
+    } finally {
+      setSaving(false);
     }
-
-    saveMenuItems(updated);
-    setMenuItems(updated);
-    setShowForm(false);
-    setEditingItem(null);
   };
 
-  const deleteItem = (id) => {
+  const deleteItem = async (id) => {
     const updated = menuItems.filter(i => i.id !== id);
-    saveMenuItems(updated);
+    await saveMenuItems(updated);
     setMenuItems(updated);
   };
 
-  const toggleAvailable = (id) => {
+  const toggleAvailable = async (id) => {
     const updated = menuItems.map(i => i.id === id ? { ...i, available: !i.available } : i);
-    saveMenuItems(updated);
+    await saveMenuItems(updated);
     setMenuItems(updated);
   };
 
   return (
     <div style={styles.container}>
       <div style={styles.topBar}>
-        <button onClick={() => router.push('/')} style={styles.backBtn}>← Terug</button>
+        <button onClick={() => router.push('/pos')} style={styles.backBtn}>← Terug</button>
         <h1 style={styles.title}>Menu Beheer</h1>
         <button onClick={openAddForm} style={styles.addBtn}>+ Nieuw Product</button>
       </div>
@@ -87,7 +101,7 @@ export default function MenuBeheer() {
       <div style={styles.content}>
         {/* Sidebar Categories */}
         <div style={styles.sidebar}>
-          <h3 style={styles.sidebarTitle}>Categorieën</h3>
+          <h3 style={styles.sidebarTitle}>Categorieen</h3>
           {categories.map(cat => (
             <button
               key={cat.id}
@@ -169,7 +183,7 @@ export default function MenuBeheer() {
               />
             </div>
             <div style={styles.formGroup}>
-              <label style={styles.label}>Prijs (€)</label>
+              <label style={styles.label}>Prijs (EUR)</label>
               <input
                 type="number"
                 step="0.01"
@@ -204,8 +218,8 @@ export default function MenuBeheer() {
             </div>
             <div style={styles.formActions}>
               <button onClick={() => setShowForm(false)} style={styles.cancelFormBtn}>Annuleren</button>
-              <button onClick={saveItem} style={styles.saveBtn}>
-                {editingItem ? 'Opslaan' : 'Toevoegen'}
+              <button onClick={saveItem} style={styles.saveBtn} disabled={saving}>
+                {saving ? 'Opslaan...' : (editingItem ? 'Opslaan' : 'Toevoegen')}
               </button>
             </div>
           </div>

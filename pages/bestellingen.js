@@ -1,16 +1,21 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
-import { getOrders, getTodayOrders, formatPrice } from '../lib/pos-data';
+import { getOrders, formatPrice } from '../lib/pos-data';
 
 export default function Bestellingen() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [expandedOrder, setExpandedOrder] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const allOrders = getOrders();
-    setOrders(allOrders);
+    async function loadOrders() {
+      const allOrders = await getOrders();
+      setOrders(allOrders);
+      setLoading(false);
+    }
+    loadOrders();
   }, []);
 
   const filteredOrders = orders.filter(o => o.date === selectedDate);
@@ -21,10 +26,6 @@ export default function Bestellingen() {
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
   const paymentBreakdown = filteredOrders.reduce((acc, o) => {
     acc[o.paymentMethod] = (acc[o.paymentMethod] || 0) + o.total;
-    return acc;
-  }, {});
-  const orderTypeBreakdown = filteredOrders.reduce((acc, o) => {
-    acc[o.orderType] = (acc[o.orderType] || 0) + 1;
     return acc;
   }, {});
 
@@ -39,13 +40,14 @@ export default function Bestellingen() {
   });
   const popularItems = Object.values(itemCounts).sort((a, b) => b.qty - a.qty).slice(0, 10);
 
-  // Available dates
-  const availableDates = [...new Set(orders.map(o => o.date))].sort().reverse();
+  if (loading) {
+    return <div style={{ padding: '40px', textAlign: 'center', fontSize: '18px' }}>Laden...</div>;
+  }
 
   return (
     <div style={styles.container}>
       <div style={styles.topBar}>
-        <button onClick={() => router.push('/')} style={styles.backBtn}>← Terug</button>
+        <button onClick={() => router.push('/pos')} style={styles.backBtn}>← Terug</button>
         <h1 style={styles.title}>Bestellingen & Rapporten</h1>
         <div style={styles.dateSelector}>
           <input

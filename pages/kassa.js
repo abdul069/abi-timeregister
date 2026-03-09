@@ -17,12 +17,17 @@ export default function Kassa() {
   const [showPayment, setShowPayment] = useState(false);
   const [showReceipt, setShowReceipt] = useState(false);
   const [lastOrder, setLastOrder] = useState(null);
-  const [orderType, setOrderType] = useState('afhalen'); // afhalen / ter plaatse
+  const [orderType, setOrderType] = useState('afhalen');
   const [searchQuery, setSearchQuery] = useState('');
+  const [processing, setProcessing] = useState(false);
 
   useEffect(() => {
-    setCategories(getCategories());
-    setMenuItems(getMenuItems());
+    async function loadData() {
+      const [cats, items] = await Promise.all([getCategories(), getMenuItems()]);
+      setCategories(cats);
+      setMenuItems(items);
+    }
+    loadData();
   }, []);
 
   const filteredItems = menuItems.filter(item => {
@@ -65,27 +70,36 @@ export default function Kassa() {
   const total = subtotal + btw;
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const processPayment = (method) => {
-    const orderNumber = getNextOrderNumber();
-    const order = {
-      id: `ORD-${Date.now()}`,
-      number: orderNumber,
-      items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
-      subtotal,
-      btw,
-      total,
-      paymentMethod: method,
-      orderType,
-      status: 'nieuw',
-      date: new Date().toISOString().split('T')[0],
-      time: new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
-      timestamp: Date.now(),
-    };
-    saveOrder(order);
-    setLastOrder(order);
-    setShowPayment(false);
-    setShowReceipt(true);
-    setCart([]);
+  const processPayment = async (method) => {
+    if (processing) return;
+    setProcessing(true);
+    try {
+      const orderNumber = await getNextOrderNumber();
+      const order = {
+        id: `ORD-${Date.now()}`,
+        number: orderNumber,
+        items: cart.map(c => ({ id: c.id, name: c.name, price: c.price, quantity: c.quantity })),
+        subtotal,
+        btw,
+        total,
+        paymentMethod: method,
+        orderType,
+        status: 'nieuw',
+        date: new Date().toISOString().split('T')[0],
+        time: new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }),
+        timestamp: Date.now(),
+      };
+      await saveOrder(order);
+      setLastOrder(order);
+      setShowPayment(false);
+      setShowReceipt(true);
+      setCart([]);
+    } catch (err) {
+      console.error('Error processing payment:', err);
+      alert('Fout bij verwerken bestelling. Probeer opnieuw.');
+    } finally {
+      setProcessing(false);
+    }
   };
 
   const closeReceipt = () => {
@@ -100,7 +114,7 @@ export default function Kassa() {
       <div style={styles.leftPanel}>
         {/* Top bar */}
         <div style={styles.topBar}>
-          <button onClick={() => router.push('/')} style={styles.backBtn}>← Terug</button>
+          <button onClick={() => router.push('/pos')} style={styles.backBtn}>← Terug</button>
           <h1 style={styles.title}>Kassa</h1>
           <div style={styles.orderTypeToggle}>
             <button
@@ -131,7 +145,7 @@ export default function Kassa() {
               style={styles.searchInput}
             />
             {searchQuery && (
-              <button onClick={() => setSearchQuery('')} style={styles.clearSearch}>×</button>
+              <button onClick={() => setSearchQuery('')} style={styles.clearSearch}>x</button>
             )}
           </div>
         </div>
@@ -209,7 +223,7 @@ export default function Kassa() {
                   <button
                     onClick={() => updateQuantity(item.id, -1)}
                     style={styles.qtyBtn}
-                  >−</button>
+                  >-</button>
                   <span style={styles.qtyDisplay}>{item.quantity}</span>
                   <button
                     onClick={() => updateQuantity(item.id, 1)}
@@ -273,15 +287,15 @@ export default function Kassa() {
               <span style={styles.modalAmount}>{formatPrice(total)}</span>
             </div>
             <div style={styles.paymentMethods}>
-              <button onClick={() => processPayment('pin')} style={styles.payMethodBtn}>
+              <button onClick={() => processPayment('pin')} style={styles.payMethodBtn} disabled={processing}>
                 <span style={{ fontSize: '40px' }}>💳</span>
                 <span>PIN</span>
               </button>
-              <button onClick={() => processPayment('contant')} style={styles.payMethodBtn}>
+              <button onClick={() => processPayment('contant')} style={styles.payMethodBtn} disabled={processing}>
                 <span style={{ fontSize: '40px' }}>💵</span>
                 <span>Contant</span>
               </button>
-              <button onClick={() => processPayment('online')} style={styles.payMethodBtn}>
+              <button onClick={() => processPayment('online')} style={styles.payMethodBtn} disabled={processing}>
                 <span style={{ fontSize: '40px' }}>📱</span>
                 <span>Online</span>
               </button>

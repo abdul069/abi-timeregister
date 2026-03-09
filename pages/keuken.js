@@ -1,27 +1,27 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import { getOrders, updateOrder, formatPrice } from '../lib/pos-data';
 
 export default function Keuken() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
-  const [filter, setFilter] = useState('actief'); // actief / klaar / alles
+  const [filter, setFilter] = useState('actief');
 
-  const loadOrders = () => {
+  const loadOrders = useCallback(async () => {
     const today = new Date().toISOString().split('T')[0];
-    const allOrders = getOrders().filter(o => o.date === today);
-    setOrders(allOrders);
-  };
+    const allOrders = await getOrders();
+    setOrders(allOrders.filter(o => o.date === today));
+  }, []);
 
   useEffect(() => {
     loadOrders();
-    const interval = setInterval(loadOrders, 3000);
+    const interval = setInterval(loadOrders, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [loadOrders]);
 
-  const updateStatus = (orderId, status) => {
-    updateOrder(orderId, { status });
-    loadOrders();
+  const updateStatus = async (orderId, status) => {
+    await updateOrder(orderId, { status });
+    await loadOrders();
   };
 
   const filteredOrders = orders.filter(o => {
@@ -47,7 +47,7 @@ export default function Keuken() {
   return (
     <div style={styles.container}>
       <div style={styles.topBar}>
-        <button onClick={() => router.push('/')} style={styles.backBtn}>← Terug</button>
+        <button onClick={() => router.push('/pos')} style={styles.backBtn}>← Terug</button>
         <h1 style={styles.title}>Keuken Display</h1>
         <div style={styles.filterGroup}>
           {['actief', 'klaar', 'alles'].map(f => (
