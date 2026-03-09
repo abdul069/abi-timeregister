@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import {
   getStaff, saveStaff, getTimeEntries, clockIn, clockOut, startBreak, endBreak,
   getActiveTimeEntry, getTimeEntriesByRange, formatPrice, ROLES, getWeekRange, getMonthRange,
+  getSchedule, saveScheduleShift, deleteScheduleShift, copyWeekSchedule,
 } from '../lib/pos-data';
 
 export default function Personeel() {
@@ -21,6 +22,14 @@ export default function Personeel() {
   const [clockError, setClockError] = useState('');
   const [clockSuccess, setClockSuccess] = useState('');
 
+  // Weekrooster state
+  const [roosterWeek, setRoosterWeek] = useState(() => getWeekRange(new Date().toISOString().split('T')[0]).start);
+  const [shifts, setShifts] = useState([]);
+  const [showShiftForm, setShowShiftForm] = useState(false);
+  const [editingShift, setEditingShift] = useState(null);
+  const [shiftForm, setShiftForm] = useState({ staffId: '', date: '', startTime: '09:00', endTime: '17:00', role: '', note: '' });
+  const [roosterLoading, setRoosterLoading] = useState(false);
+
   useEffect(() => {
     loadData();
     const s = sessionStorage.getItem('posStaff');
@@ -38,6 +47,89 @@ export default function Personeel() {
     setActiveEntries(activeMap);
     setTimeEntries(entries);
     setLoading(false);
+  };
+
+  // Load schedule when week changes
+  useEffect(() => {
+    if (tab === 'rooster') loadSchedule();
+  }, [roosterWeek, tab]);
+
+  const loadSchedule = async () => {
+    setRoosterLoading(true);
+    const data = await getSchedule(roosterWeek);
+    setShifts(data);
+    setRoosterLoading(false);
+  };
+
+  const getRoosterDays = () => {
+    const days = [];
+    const start = new Date(roosterWeek);
+    const dayNames = ['Ma', 'Di', 'Wo', 'Do', 'Vr', 'Za', 'Zo'];
+    const dayNamesFull = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(start);
+      d.setDate(start.getDate() + i);
+      days.push({ date: d.toISOString().split('T')[0], short: dayNames[i], full: dayNamesFull[i], day: d.getDate(), month: d.getMonth() + 1 });
+    }
+    return days;
+  };
+
+  const navigateRoosterWeek = (offset) => {
+    const d = new Date(roosterWeek);
+    d.setDate(d.getDate() + (offset * 7));
+    setRoosterWeek(d.toISOString().split('T')[0]);
+  };
+
+  const handleSaveShift = async () => {
+    if (!shiftForm.staffId || !shiftForm.date || !shiftForm.startTime || !shiftForm.endTime) return;
+    const member = staff.find(s => s.id === shiftForm.staffId);
+    const shift = {
+      ...shiftForm,
+      staffName: member?.name || '',
+      weekStart: roosterWeek,
+      ...(editingShift ? { _docId: editingShift._docId, id: editingShift.id } : {}),
+    };
+    await saveScheduleShift(shift);
+    await loadSchedule();
+    setShowShiftForm(false);
+    setEditingShift(null);
+  };
+
+  const handleDeleteShift = async (shift) => {
+    if (!confirm('Shift verwijderen?')) return;
+    await deleteScheduleShift(shift._docId);
+    await loadSchedule();
+  };
+
+  const handleCopyWeek = async () => {
+    const prevWeek = new Date(roosterWeek);
+    prevWeek.setDate(prevWeek.getDate() - 7);
+    const prevStart = prevWeek.toISOString().split('T')[0];
+    if (!confirm(`Rooster kopieren van week ${prevStart}?`)) return;
+    setRoosterLoading(true);
+    await copyWeekSchedule(prevStart, roosterWeek);
+    await loadSchedule();
+  };
+
+  const openShiftForm = (date, staffId, existing) => {
+    if (existing) {
+      setEditingShift(existing);
+      setShiftForm({ staffId: existing.staffId, date: existing.date, startTime: existing.startTime, endTime: existing.endTime, role: existing.role || '', note: existing.note || '' });
+    } else {
+      setEditingShift(null);
+      setShiftForm({ staffId: staffId || '', date: date || '', startTime: '09:00', endTime: '17:00', role: '', note: '' });
+    }
+    setShowShiftForm(true);
+  };
+
+  const getShiftHours = (start, end) => {
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    return ((eh * 60 + em) - (sh * 60 + sm)) / 60;
+  };
+
+  const getStaffWeekHours = (staffId) => {
+    return shifts.filter(s => s.staffId === staffId).reduce((sum, s) => sum + getShiftHours(s.startTime, s.endTime), 0);
   };
 
   const newStaffTemplate = { name: '', pin: '', role: 'kassier', active: true, email: '', phone: '', hourlyWage: '', contractHours: '', contractType: 'flex', startDate: '', notes: '' };
@@ -155,6 +247,7 @@ export default function Personeel() {
         {[
           { id: 'medewerkers', label: 'Medewerkers', icon: '👥', count: staff.length },
           { id: 'inklokken', label: 'Inklokken', icon: '⏰', count: Object.keys(activeEntries).length },
+          { id: 'rooster', label: 'Weekrooster', icon: '📅' },
           { id: 'uren', label: 'Uren & Loon', icon: '📊' },
           { id: 'rechten', label: 'Rollen & Rechten', icon: '🔐' },
         ].map(t => (
@@ -301,6 +394,139 @@ export default function Personeel() {
           </>
         )}
 
+        {tab === 'rooster' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <button onClick={() => navigateRoosterWeek(-1)} style={st.dateArrow}>‹</button>
+                <h2 style={{ margin: 0, fontSize: '18px' }}>
+                  Week {(() => { const d = new Date(roosterWeek); const onejan = new Date(d.getFullYear(), 0, 1); return Math.ceil((((d - onejan) / 86400000) + onejan.getDay() + 1) / 7); })()}
+                  <span style={{ fontSize: '13px', color: '#8b949e', fontWeight: '400', marginLeft: '8px' }}>
+                    {getRoosterDays()[0].day}/{getRoosterDays()[0].month} - {getRoosterDays()[6].day}/{getRoosterDays()[6].month}
+                  </span>
+                </h2>
+                <button onClick={() => navigateRoosterWeek(1)} style={st.dateArrow}>›</button>
+                {roosterWeek !== getWeekRange(new Date().toISOString().split('T')[0]).start && (
+                  <button onClick={() => setRoosterWeek(getWeekRange(new Date().toISOString().split('T')[0]).start)} style={{ ...st.filterBtn, borderColor: '#238636', color: '#3fb950', background: 'rgba(35,134,54,0.1)' }}>Deze Week</button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: '6px' }}>
+                <button onClick={handleCopyWeek} style={{ ...st.filterBtn, borderColor: '#58a6ff', color: '#58a6ff', background: 'rgba(88,166,255,0.08)' }}>
+                  Vorige Week Kopieren
+                </button>
+                <button onClick={() => openShiftForm(getRoosterDays()[0].date, '')} style={st.addBtn}>+ Shift Toevoegen</button>
+              </div>
+            </div>
+
+            {roosterLoading ? (
+              <div style={st.noData}>Laden...</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: '900px' }}>
+                  {/* Day header row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '160px repeat(7, 1fr)', gap: '2px', marginBottom: '2px' }}>
+                    <div style={st.roosterCorner}>Medewerker</div>
+                    {getRoosterDays().map(day => {
+                      const isToday = day.date === new Date().toISOString().split('T')[0];
+                      const dayShiftCount = shifts.filter(s => s.date === day.date).length;
+                      return (
+                        <div key={day.date} style={{ ...st.roosterDayHeader, ...(isToday ? { background: 'rgba(35,134,54,0.15)', borderBottom: '2px solid #3fb950' } : {}), ...(day.short === 'Za' || day.short === 'Zo' ? { background: 'rgba(240,136,62,0.06)' } : {}) }}>
+                          <div style={{ fontWeight: '700', fontSize: '13px', color: isToday ? '#3fb950' : '#e6edf3' }}>{day.short}</div>
+                          <div style={{ fontSize: '11px', color: '#8b949e' }}>{day.day}/{day.month}</div>
+                          {dayShiftCount > 0 && <div style={{ fontSize: '10px', color: '#58a6ff', fontWeight: '600' }}>{dayShiftCount} shifts</div>}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Staff rows */}
+                  {staff.filter(s => s.active).map(member => {
+                    const weekHours = getStaffWeekHours(member.id);
+                    const contractHours = member.contractHours || 0;
+                    const isOver = contractHours > 0 && weekHours > contractHours;
+                    return (
+                      <div key={member.id} style={{ display: 'grid', gridTemplateColumns: '160px repeat(7, 1fr)', gap: '2px', marginBottom: '2px' }}>
+                        <div style={st.roosterStaffCell}>
+                          <div style={{ ...st.avatar, width: '28px', height: '28px', fontSize: '11px', background: member.role === 'admin' ? '#da3633' : '#238636' }}>{member.name.charAt(0)}</div>
+                          <div>
+                            <div style={{ fontWeight: '600', fontSize: '13px' }}>{member.name}</div>
+                            <div style={{ fontSize: '10px', color: isOver ? '#f85149' : '#8b949e' }}>
+                              {weekHours.toFixed(1)}u{contractHours > 0 ? ` / ${contractHours}u` : ''}
+                            </div>
+                          </div>
+                        </div>
+                        {getRoosterDays().map(day => {
+                          const dayShifts = shifts.filter(s => s.staffId === member.id && s.date === day.date);
+                          const isToday = day.date === new Date().toISOString().split('T')[0];
+                          const isWeekend = day.short === 'Za' || day.short === 'Zo';
+                          return (
+                            <div
+                              key={day.date}
+                              style={{ ...st.roosterCell, ...(isToday ? { borderLeft: '2px solid #3fb950' } : {}), ...(isWeekend ? { background: 'rgba(240,136,62,0.03)' } : {}), cursor: 'pointer' }}
+                              onClick={() => { if (dayShifts.length === 0) openShiftForm(day.date, member.id); }}
+                            >
+                              {dayShifts.length === 0 && (
+                                <div style={{ color: '#30363d', fontSize: '18px', textAlign: 'center' }}>+</div>
+                              )}
+                              {dayShifts.map(shift => (
+                                <div
+                                  key={shift.id}
+                                  style={st.roosterShift}
+                                  onClick={(e) => { e.stopPropagation(); openShiftForm(null, null, shift); }}
+                                >
+                                  <div style={{ fontWeight: '700', fontSize: '11px', color: '#e6edf3' }}>{shift.startTime} - {shift.endTime}</div>
+                                  <div style={{ fontSize: '10px', color: '#8b949e' }}>{getShiftHours(shift.startTime, shift.endTime).toFixed(1)}u</div>
+                                  {shift.note && <div style={{ fontSize: '9px', color: '#f0883e', marginTop: '1px' }}>{shift.note}</div>}
+                                  <button onClick={(e) => { e.stopPropagation(); handleDeleteShift(shift); }} style={st.roosterDeleteBtn}>✕</button>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+
+                  {/* Totals row */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '160px repeat(7, 1fr)', gap: '2px', marginTop: '4px' }}>
+                    <div style={{ ...st.roosterCorner, fontWeight: '700', color: '#58a6ff' }}>Totaal</div>
+                    {getRoosterDays().map(day => {
+                      const dayShifts = shifts.filter(s => s.date === day.date);
+                      const dayHours = dayShifts.reduce((sum, s) => sum + getShiftHours(s.startTime, s.endTime), 0);
+                      return (
+                        <div key={day.date} style={{ ...st.roosterDayHeader, background: 'rgba(88,166,255,0.05)' }}>
+                          <div style={{ fontWeight: '700', fontSize: '13px', color: '#58a6ff' }}>{dayHours.toFixed(1)}u</div>
+                          <div style={{ fontSize: '10px', color: '#8b949e' }}>{dayShifts.length} shifts</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Summary */}
+            <div style={{ ...st.kpiGrid, marginTop: '16px' }}>
+              <div style={st.kpiCard}>
+                <div style={st.kpiVal}>{shifts.length}</div>
+                <div style={st.kpiLabel}>Shifts</div>
+              </div>
+              <div style={st.kpiCard}>
+                <div style={st.kpiVal}>{shifts.reduce((sum, s) => sum + getShiftHours(s.startTime, s.endTime), 0).toFixed(1)}u</div>
+                <div style={st.kpiLabel}>Totaal Uren</div>
+              </div>
+              <div style={st.kpiCard}>
+                <div style={{ ...st.kpiVal, color: '#f0883e' }}>{formatPrice(shifts.reduce((sum, s) => { const m = staff.find(st2 => st2.id === s.staffId); return sum + getShiftHours(s.startTime, s.endTime) * (m?.hourlyWage || 0); }, 0))}</div>
+                <div style={st.kpiLabel}>Geschatte Loonkosten</div>
+              </div>
+              <div style={st.kpiCard}>
+                <div style={st.kpiVal}>{[...new Set(shifts.map(s => s.staffId))].length}</div>
+                <div style={st.kpiLabel}>Medewerkers Ingepland</div>
+              </div>
+            </div>
+          </>
+        )}
+
         {tab === 'rechten' && (
           <div style={st.card}>
             <h2 style={st.cardTitle}>Rollen & Rechten Matrix</h2>
@@ -330,6 +556,58 @@ export default function Personeel() {
           </div>
         )}
       </div>
+
+      {showShiftForm && (
+        <div style={st.overlay} onClick={() => setShowShiftForm(false)}>
+          <div style={{ ...st.modal, width: '440px' }} onClick={e => e.stopPropagation()}>
+            <h2 style={st.modalTitle}>{editingShift ? 'Shift Bewerken' : 'Nieuwe Shift'}</h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div style={st.formGroup}>
+                <label style={st.label}>Medewerker *</label>
+                <select value={shiftForm.staffId} onChange={e => setShiftForm({ ...shiftForm, staffId: e.target.value })} style={st.input}>
+                  <option value="">-- Selecteer --</option>
+                  {staff.filter(s => s.active).map(s => (<option key={s.id} value={s.id}>{s.name} ({ROLES[s.role]?.label})</option>))}
+                </select>
+              </div>
+              <div style={st.formGroup}>
+                <label style={st.label}>Datum *</label>
+                <input type="date" value={shiftForm.date} onChange={e => setShiftForm({ ...shiftForm, date: e.target.value })} style={st.input} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div style={st.formGroup}>
+                  <label style={st.label}>Start *</label>
+                  <input type="time" value={shiftForm.startTime} onChange={e => setShiftForm({ ...shiftForm, startTime: e.target.value })} style={st.input} />
+                </div>
+                <div style={st.formGroup}>
+                  <label style={st.label}>Eind *</label>
+                  <input type="time" value={shiftForm.endTime} onChange={e => setShiftForm({ ...shiftForm, endTime: e.target.value })} style={st.input} />
+                </div>
+              </div>
+              {shiftForm.startTime && shiftForm.endTime && (
+                <div style={{ textAlign: 'center', padding: '6px', background: 'rgba(63,185,80,0.08)', borderRadius: '6px', fontSize: '13px', color: '#3fb950', fontWeight: '600' }}>
+                  {getShiftHours(shiftForm.startTime, shiftForm.endTime).toFixed(1)} uur
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px' }}>
+                {[['09:00-17:00', 'Dag'], ['11:00-15:00', 'Lunch'], ['16:00-22:00', 'Avond'], ['17:00-23:00', 'Sluit']].map(([time, label]) => (
+                  <button key={time} onClick={() => { const [s, e] = time.split('-'); setShiftForm({ ...shiftForm, startTime: s, endTime: e }); }}
+                    style={{ padding: '6px 10px', border: '1px solid #30363d', borderRadius: '6px', background: 'rgba(255,255,255,0.03)', color: '#8b949e', cursor: 'pointer', fontSize: '11px', fontWeight: '600' }}>
+                    {label} ({time})
+                  </button>
+                ))}
+              </div>
+              <div style={st.formGroup}>
+                <label style={st.label}>Notitie</label>
+                <input type="text" value={shiftForm.note} onChange={e => setShiftForm({ ...shiftForm, note: e.target.value })} style={st.input} placeholder="Bijv. opening, training..." />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+              <button onClick={() => setShowShiftForm(false)} style={{ ...st.actionBtn, background: '#484f58', flex: 1 }}>Annuleren</button>
+              <button onClick={handleSaveShift} style={{ ...st.actionBtn, background: '#238636', flex: 2 }}>Opslaan</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showForm && (
         <div style={st.overlay} onClick={() => setShowForm(false)}>
@@ -409,4 +687,11 @@ const st = {
   label: { display: 'block', fontSize: '11px', fontWeight: '600', color: '#8b949e', marginBottom: '4px' },
   input: { width: '100%', padding: '8px 10px', border: '1px solid #30363d', borderRadius: '6px', background: '#0d1117', color: '#e6edf3', fontSize: '14px', outline: 'none', boxSizing: 'border-box' },
   actionBtn: { width: '100%', padding: '12px', border: 'none', borderRadius: '8px', background: '#238636', color: '#fff', fontSize: '14px', fontWeight: 'bold', cursor: 'pointer' },
+  dateArrow: { padding: '6px 12px', border: '1px solid #30363d', borderRadius: '6px', background: 'transparent', color: '#e6edf3', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' },
+  roosterCorner: { padding: '10px 12px', background: '#161b22', borderRadius: '6px', fontSize: '12px', fontWeight: '600', color: '#8b949e', display: 'flex', alignItems: 'center' },
+  roosterDayHeader: { padding: '8px', textAlign: 'center', background: '#161b22', borderRadius: '6px' },
+  roosterStaffCell: { padding: '8px 10px', background: '#161b22', borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' },
+  roosterCell: { padding: '4px', background: '#161b22', borderRadius: '6px', minHeight: '60px', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: '3px' },
+  roosterShift: { position: 'relative', padding: '5px 8px', background: 'rgba(35,134,54,0.12)', borderRadius: '6px', borderLeft: '3px solid #3fb950', cursor: 'pointer', transition: 'background 0.15s' },
+  roosterDeleteBtn: { position: 'absolute', top: '2px', right: '4px', background: 'none', border: 'none', color: '#f85149', cursor: 'pointer', fontSize: '10px', opacity: 0.5, padding: '2px' },
 };

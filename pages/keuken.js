@@ -2,10 +2,20 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { getOrders, updateOrder, formatPrice } from '../lib/pos-data';
 
+// Kitchen stations - each station sees items from specific categories
+const STATIONS = [
+  { id: 'alles', label: 'Alle Stations', icon: '📋', categories: null },
+  { id: 'grill', label: 'Grill', icon: '🔥', categories: ['burgers', 'chicken'] },
+  { id: 'frituur', label: 'Frituur', icon: '🍟', categories: ['fries'] },
+  { id: 'dranken', label: 'Dranken & Desserts', icon: '🥤', categories: ['drinks', 'desserts'] },
+  { id: 'assembly', label: 'Samenstelling', icon: '📦', categories: ['menu', 'sauzen', 'extras'] },
+];
+
 export default function Keuken() {
   const router = useRouter();
   const [orders, setOrders] = useState([]);
   const [filter, setFilter] = useState('actief');
+  const [station, setStation] = useState('alles');
   const [currentTime, setCurrentTime] = useState(Date.now());
   const [clock, setClock] = useState('');
   const prevOrderCountRef = useRef(0);
@@ -65,11 +75,26 @@ export default function Keuken() {
     await loadOrders();
   };
 
-  const filteredOrders = orders.filter(o => {
+  // Filter by status
+  const statusFiltered = orders.filter(o => {
     if (filter === 'actief') return o.status === 'nieuw' || o.status === 'bezig';
     if (filter === 'klaar') return o.status === 'klaar';
     return true;
   });
+
+  // Filter by station - only show orders that have items for this station
+  const activeStation = STATIONS.find(st => st.id === station);
+  const filteredOrders = activeStation && activeStation.categories
+    ? statusFiltered.filter(o => {
+        return (o.items || []).some(item => activeStation.categories.includes(item.category));
+      })
+    : statusFiltered;
+
+  // For station view, filter items within each order to only show relevant items
+  const getStationItems = (order) => {
+    if (!activeStation || !activeStation.categories) return order.items || [];
+    return (order.items || []).filter(item => activeStation.categories.includes(item.category));
+  };
 
   const getWaitTime = (timestamp) => {
     const mins = Math.floor((currentTime - timestamp) / 60000);
@@ -128,6 +153,29 @@ export default function Keuken() {
         <div style={s.clock}>{clock}</div>
       </div>
 
+      {/* Station selector */}
+      <div style={{ display: 'flex', gap: '6px', padding: '8px 20px', background: '#0d1117', borderBottom: '1px solid #21262d', overflowX: 'auto' }}>
+        {STATIONS.map(st => (
+          <button
+            key={st.id}
+            onClick={() => setStation(st.id)}
+            style={{
+              padding: '6px 14px', border: station === st.id ? '2px solid #58a6ff' : '2px solid #30363d',
+              borderRadius: '8px', background: station === st.id ? '#58a6ff15' : 'transparent',
+              color: station === st.id ? '#58a6ff' : '#8b949e', cursor: 'pointer', fontSize: '12px',
+              fontWeight: '600', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px',
+            }}
+          >
+            {st.icon} {st.label}
+            {st.categories && (
+              <span style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: '6px', fontSize: '10px' }}>
+                {statusFiltered.filter(o => (o.items || []).some(item => st.categories.includes(item.category))).length}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
       <div style={s.ordersGrid}>
         {filteredOrders.length === 0 && (
           <div style={s.emptyState}>
@@ -172,12 +220,14 @@ export default function Keuken() {
                   <span style={s.orderType}>
                     {order.orderType === 'afhalen' ? '📦 Afhalen' : order.orderType === 'bezorgen' ? '🚗 Bezorgen' : '🍽 Ter Plaatse'}
                   </span>
+                  {order.tableNumber && <span style={{ color: '#58a6ff', fontWeight: '600' }}>🪑 T{order.tableNumber}</span>}
+                  {order.platform && order.platform !== 'pos' && <span style={{ color: '#FF8000', fontWeight: '600' }}>🟠 {order.platform}</span>}
                   {order.staffName && <span>👤 {order.staffName}</span>}
                 </div>
               </div>
 
               <div style={s.orderItems}>
-                {order.items.map((item, i) => {
+                {getStationItems(order).map((item, i) => {
                   const customParts = [];
                   if (item.customizations) {
                     Object.entries(item.customizations).forEach(([key, val]) => {

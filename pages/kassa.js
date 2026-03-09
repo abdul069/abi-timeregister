@@ -15,6 +15,8 @@ import {
   getPendingIncomingOrders,
   acceptIncomingOrder,
   rejectIncomingOrder,
+  verifyPin,
+  hasPermission,
 } from '../lib/pos-data';
 
 export default function Kassa() {
@@ -71,6 +73,22 @@ export default function Kassa() {
   const [incomingOrders, setIncomingOrders] = useState([]);
   const [showIncoming, setShowIncoming] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
+
+  // Split payment
+  const [showSplitPay, setShowSplitPay] = useState(false);
+  const [splitCash, setSplitCash] = useState('');
+  const [splitPin, setSplitPin] = useState('');
+
+  // Table system
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [showTablePicker, setShowTablePicker] = useState(false);
+  const TABLES = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, label: `Tafel ${i + 1}` }));
+
+  // Manager PIN authorization for high discounts
+  const [showManagerPin, setShowManagerPin] = useState(false);
+  const [managerPinInput, setManagerPinInput] = useState('');
+  const [managerPinError, setManagerPinError] = useState('');
+  const [pendingDiscountAction, setPendingDiscountAction] = useState(null);
 
   useEffect(() => {
     async function loadData() {
@@ -237,28 +255,54 @@ export default function Kassa() {
   const total = subtotalAfterDiscount + btw;
   const totalItems = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  // Apply item discount
+  // Apply item discount (with manager auth for high discounts)
   const applyItemDiscount = () => {
     if (!selectedCartItem || !discountValue) return;
     const val = parseFloat(discountValue);
     if (isNaN(val) || val <= 0) return;
-    setCart(prev => prev.map(c =>
-      c.cartId === selectedCartItem ? { ...c, discount: { type: discountType, value: val } } : c
-    ));
-    setShowDiscount(false);
-    setDiscountValue('');
+
+    const doApply = () => {
+      setCart(prev => prev.map(c =>
+        c.cartId === selectedCartItem ? { ...c, discount: { type: discountType, value: val } } : c
+      ));
+      setShowDiscount(false);
+      setDiscountValue('');
+    };
+
+    if (requireManagerAuth(val, discountType)) {
+      setPendingDiscountAction(() => doApply);
+      setShowDiscount(false);
+      setManagerPinInput('');
+      setManagerPinError('');
+      setShowManagerPin(true);
+    } else {
+      doApply();
+    }
   };
 
-  // Apply ticket discount
+  // Apply ticket discount (with manager auth for high discounts)
   const applyTicketDiscount = () => {
     const val = parseFloat(discountValue);
     if (isNaN(val) || val <= 0) return;
-    setTicketDiscount({ type: discountType, value: val });
-    setShowDiscount(false);
-    setDiscountValue('');
+
+    const doApply = () => {
+      setTicketDiscount({ type: discountType, value: val });
+      setShowDiscount(false);
+      setDiscountValue('');
+    };
+
+    if (requireManagerAuth(val, discountType)) {
+      setPendingDiscountAction(() => doApply);
+      setShowDiscount(false);
+      setManagerPinInput('');
+      setManagerPinError('');
+      setShowManagerPin(true);
+    } else {
+      doApply();
+    }
   };
 
-  const processPayment = async (method, cashInfo) => {
+  const processPayment = async (method, cashInfo, splitInfo) => {
     if (processing) return;
     setProcessing(true);
     try {
@@ -291,21 +335,29 @@ export default function Kassa() {
         timestamp: Date.now(),
         staffId: currentStaff?.id || null,
         staffName: currentStaff?.name || null,
+        tableNumber: selectedTable || null,
       };
       if (cashInfo) {
         order.cashGiven = cashInfo.given;
         order.cashChange = cashInfo.change;
       }
+      if (splitInfo) {
+        order.splitPayment = splitInfo;
+      }
       await saveOrder(order);
       setLastOrder(order);
       setShowPayment(false);
       setShowCashInput(false);
+      setShowSplitPay(false);
       setCashGiven('');
+      setSplitCash('');
+      setSplitPin('');
       setShowReceipt(true);
       setCart([]);
       setTicketDiscount(null);
       setOrderNote('');
       setSelectedCartItem(null);
+      setSelectedTable(null);
     } catch (err) {
       console.error('Error processing payment:', err);
       alert('Fout bij verwerken bestelling.');
@@ -393,6 +445,88 @@ export default function Kassa() {
     }
   };
 
+  // Split payment handler
+  const handleSplitPayment = () => {
+    const cashAmount = parseFloat(splitCash) || 0;
+    const pinAmount = parseFloat(splitPin) || 0;
+    if (cashAmount + pinAmount < total - 0.01) return;
+    const change = (cashAmount + pinAmount) - total;
+    processPayment('gesplitst', { given: cashAmount, change: Math.max(0, change) }, {
+      cash: cashAmount,
+      pin: pinAmount,
+      change: Math.max(0, change),
+    });
+  };
+
+  // Auto-fill split amounts
+  const handleSplitCashChange = (val) => {
+    setSplitCash(val);
+    const cashVal = parseFloat(val) || 0;
+    const remaining = Math.max(0, total - cashVal);
+    setSplitPin(remaining > 0 ? remaining.toFixed(2) : '0.00');
+  };
+
+  // Manager PIN authorization for high discounts (>20%)
+  const requireManagerAuth = (discountVal, discType) => {
+    const threshold = discType === 'percent' ? 20 : subtotal * 0.20;
+    if (discountVal > threshold) {
+      // Check if current staff has discount_high permission
+      if (currentStaff && hasPermission(currentStaff, 'discount_high')) {
+        return false; // No auth needed, staff has permission
+      }
+      return true; // Need manager PIN
+    }
+    return false;
+  };
+
+  const handleManagerPinSubmit = async () => {
+    const staff = await verifyPin(managerPinInput);
+    if (staff && hasPermission(staff, 'discount_high')) {
+      setShowManagerPin(false);
+      setManagerPinInput('');
+      setManagerPinError('');
+      // Execute the pending discount action
+      if (pendingDiscountAction) {
+        pendingDiscountAction();
+        setPendingDiscountAction(null);
+      }
+    } else {
+      setManagerPinError(staff ? 'Geen korting rechten' : 'Ongeldige PIN');
+      setManagerPinInput('');
+    }
+  };
+
+  const handleManagerPinKey = (key) => {
+    if (key === '⌫') {
+      setManagerPinInput(prev => prev.slice(0, -1));
+      setManagerPinError('');
+    } else if (key === 'C') {
+      setManagerPinInput('');
+      setManagerPinError('');
+    } else if (managerPinInput.length < 4) {
+      const newPin = managerPinInput + key;
+      setManagerPinInput(newPin);
+      setManagerPinError('');
+      if (newPin.length === 4) {
+        setTimeout(async () => {
+          const staff = await verifyPin(newPin);
+          if (staff && hasPermission(staff, 'discount_high')) {
+            setShowManagerPin(false);
+            setManagerPinInput('');
+            setManagerPinError('');
+            if (pendingDiscountAction) {
+              pendingDiscountAction();
+              setPendingDiscountAction(null);
+            }
+          } else {
+            setManagerPinError(staff ? 'Geen korting rechten' : 'Ongeldige PIN');
+            setManagerPinInput('');
+          }
+        }, 200);
+      }
+    }
+  };
+
   const handleAcceptIncoming = async (order) => {
     const staffId = currentStaff?.id || 'system';
     await acceptIncomingOrder(order._docId, staffId);
@@ -477,12 +611,23 @@ export default function Kassa() {
               <button
                 key={type}
                 style={{ ...st.pillBtn, ...(orderType === type ? st.pillActive : {}) }}
-                onClick={() => setOrderType(type)}
+                onClick={() => {
+                  setOrderType(type);
+                  if (type === 'ter plaatse') setShowTablePicker(true);
+                  else setSelectedTable(null);
+                }}
               >
                 {type === 'afhalen' ? '📦' : type === 'ter plaatse' ? '🍽' : '🚗'} {type.charAt(0).toUpperCase() + type.slice(1)}
               </button>
             ))}
           </div>
+          {selectedTable && orderType === 'ter plaatse' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
+              <span style={{ fontSize: '11px', color: '#58a6ff', fontWeight: '600' }}>🪑 Tafel {selectedTable}</span>
+              <button onClick={() => setShowTablePicker(true)} style={{ border: 'none', background: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '10px' }}>wijzig</button>
+              <button onClick={() => setSelectedTable(null)} style={{ border: 'none', background: 'none', color: '#f85149', cursor: 'pointer', fontSize: '10px' }}>×</button>
+            </div>
+          )}
         </div>
 
         {/* Order items list */}
@@ -785,6 +930,9 @@ export default function Kassa() {
                 <span style={{ fontSize: '15px', fontWeight: '700' }}>Online</span>
               </button>
             </div>
+            <button onClick={() => { setShowPayment(false); setSplitCash(''); setSplitPin(total.toFixed(2)); setShowSplitPay(true); }} style={{ ...st.cancelBtnFull, marginBottom: '8px', color: '#d29922', borderColor: '#d2992240' }} disabled={processing}>
+              ✂️ Gesplitst Betalen (Contant + PIN)
+            </button>
             <button onClick={() => setShowPayment(false)} style={st.cancelBtnFull}>Annuleren</button>
           </div>
         </div>
@@ -891,12 +1039,21 @@ export default function Kassa() {
               <div style={st.receiptDivider} />
               <div style={{ textAlign: 'center', color: '#8b949e', fontSize: '13px' }}>
                 <div>Betaald: {lastOrder.paymentMethod.toUpperCase()}</div>
-                {lastOrder.cashGiven != null && (
+                {lastOrder.splitPayment && (
+                  <div style={{ marginTop: '2px' }}>
+                    💵 Contant: {formatPrice(lastOrder.splitPayment.cash)} · 💳 PIN: {formatPrice(lastOrder.splitPayment.pin)}
+                  </div>
+                )}
+                {lastOrder.cashGiven != null && !lastOrder.splitPayment && (
                   <>
                     <div>Ontvangen: {formatPrice(lastOrder.cashGiven)}</div>
                     <div style={{ fontWeight: 'bold', color: '#3fb950', fontSize: '16px' }}>Wisselgeld: {formatPrice(lastOrder.cashChange)}</div>
                   </>
                 )}
+                {lastOrder.splitPayment && lastOrder.splitPayment.change > 0.01 && (
+                  <div style={{ fontWeight: 'bold', color: '#3fb950', fontSize: '16px' }}>Wisselgeld: {formatPrice(lastOrder.splitPayment.change)}</div>
+                )}
+                {lastOrder.tableNumber && <div>🪑 Tafel {lastOrder.tableNumber}</div>}
                 {lastOrder.staffName && <div>Medewerker: {lastOrder.staffName}</div>}
                 {lastOrder.orderNote && <div style={{ color: '#f0883e' }}>📝 {lastOrder.orderNote}</div>}
                 <div style={{ marginTop: '4px' }}>{lastOrder.date} {lastOrder.time}</div>
@@ -991,6 +1148,171 @@ export default function Kassa() {
               <button onClick={() => { setOrderNote(''); setShowOrderNote(false); }} style={st.cancelBtnHalf}>Wissen</button>
               <button onClick={() => setShowOrderNote(false)} style={st.confirmBtnHalf}>Opslaan</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== SPLIT PAYMENT MODAL ===== */}
+      {showSplitPay && (
+        <div style={st.overlay} onClick={() => setShowSplitPay(false)}>
+          <div style={st.cashModal} onClick={e => e.stopPropagation()}>
+            <h2 style={st.modalTitle}>✂️ Gesplitst Betalen</h2>
+            <div style={st.cashTotalRow}>
+              <span>Te betalen:</span>
+              <span style={{ fontSize: '24px', fontWeight: 'bold', color: '#f0883e' }}>{formatPrice(total)}</span>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ fontSize: '12px', color: '#8b949e', fontWeight: '600', display: 'block', marginBottom: '4px' }}>💵 Contant bedrag</label>
+              <input
+                type="number"
+                value={splitCash}
+                onChange={e => handleSplitCashChange(e.target.value)}
+                style={{ ...st.noteInput, fontSize: '20px', fontWeight: 'bold', textAlign: 'center' }}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                autoFocus
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '6px', marginBottom: '14px', flexWrap: 'wrap' }}>
+              {[5, 10, 20, 50].map(amount => (
+                <button
+                  key={amount}
+                  onClick={() => handleSplitCashChange(String(Math.min(amount, total)))}
+                  style={{ ...st.cashQuickBtn, flex: '1 1 auto', minWidth: '60px' }}
+                >
+                  €{amount}
+                </button>
+              ))}
+              <button onClick={() => handleSplitCashChange((total / 2).toFixed(2))} style={{ ...st.cashQuickBtnExact, flex: '1 1 auto', minWidth: '60px' }}>
+                50/50
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '14px' }}>
+              <label style={{ fontSize: '12px', color: '#8b949e', fontWeight: '600', display: 'block', marginBottom: '4px' }}>💳 PIN bedrag</label>
+              <input
+                type="number"
+                value={splitPin}
+                onChange={e => setSplitPin(e.target.value)}
+                style={{ ...st.noteInput, fontSize: '20px', fontWeight: 'bold', textAlign: 'center' }}
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+              />
+            </div>
+
+            {/* Totaal check */}
+            {(() => {
+              const cashAmt = parseFloat(splitCash) || 0;
+              const pinAmt = parseFloat(splitPin) || 0;
+              const splitTotal = cashAmt + pinAmt;
+              const isValid = splitTotal >= total - 0.01;
+              const change = splitTotal - total;
+              return (
+                <div style={{ padding: '12px', borderRadius: '10px', marginBottom: '14px', background: isValid ? 'rgba(35,134,54,0.1)' : 'rgba(248,81,73,0.1)', border: `1px solid ${isValid ? 'rgba(35,134,54,0.25)' : 'rgba(248,81,73,0.25)'}` }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#8b949e' }}>
+                    <span>Contant + PIN:</span>
+                    <span style={{ fontWeight: 'bold', color: isValid ? '#3fb950' : '#f85149' }}>{formatPrice(splitTotal)}</span>
+                  </div>
+                  {change > 0.01 && isValid && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', marginTop: '4px' }}>
+                      <span style={{ color: '#8b949e' }}>Wisselgeld:</span>
+                      <span style={{ fontWeight: 'bold', color: '#3fb950' }}>{formatPrice(change)}</span>
+                    </div>
+                  )}
+                  {!isValid && (
+                    <div style={{ fontSize: '11px', color: '#f85149', marginTop: '4px' }}>
+                      Nog {formatPrice(total - splitTotal)} nodig
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div style={st.cashActions}>
+              <button onClick={() => setShowSplitPay(false)} style={st.cancelBtnHalf}>← Annuleren</button>
+              <button
+                onClick={handleSplitPayment}
+                style={{ ...st.confirmBtnHalf, opacity: ((parseFloat(splitCash) || 0) + (parseFloat(splitPin) || 0)) >= total - 0.01 ? 1 : 0.4 }}
+                disabled={((parseFloat(splitCash) || 0) + (parseFloat(splitPin) || 0)) < total - 0.01 || processing}
+              >
+                {processing ? 'Verwerken...' : 'Bevestig Betaling'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== TABLE PICKER MODAL ===== */}
+      {showTablePicker && (
+        <div style={st.overlay} onClick={() => setShowTablePicker(false)}>
+          <div style={st.smallModal} onClick={e => e.stopPropagation()}>
+            <h2 style={st.modalTitle}>🪑 Tafelnummer Kiezen</h2>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
+              {TABLES.map(table => (
+                <button
+                  key={table.id}
+                  onClick={() => { setSelectedTable(table.id); setShowTablePicker(false); }}
+                  style={{
+                    padding: '16px 8px',
+                    border: selectedTable === table.id ? '2px solid #58a6ff' : '2px solid #30363d',
+                    borderRadius: '10px',
+                    background: selectedTable === table.id ? '#58a6ff15' : 'rgba(255,255,255,0.04)',
+                    color: selectedTable === table.id ? '#58a6ff' : '#e6edf3',
+                    cursor: 'pointer',
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    textAlign: 'center',
+                  }}
+                >
+                  {table.id}
+                  <div style={{ fontSize: '9px', fontWeight: '400', color: '#8b949e', marginTop: '2px' }}>Tafel</div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={() => { setSelectedTable(null); setShowTablePicker(false); }} style={st.cancelBtnHalf}>Geen Tafel</button>
+              <button onClick={() => setShowTablePicker(false)} style={st.confirmBtnHalf}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== MANAGER PIN AUTHORIZATION MODAL ===== */}
+      {showManagerPin && (
+        <div style={st.overlay} onClick={() => { setShowManagerPin(false); setPendingDiscountAction(null); }}>
+          <div style={{ background: '#161b22', borderRadius: '20px', border: '1px solid #f0883e40', padding: '28px', width: '320px' }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: '40px', textAlign: 'center', marginBottom: '8px' }}>🔐</div>
+            <h2 style={{ margin: '0 0 4px', fontSize: '18px', fontWeight: 'bold', color: '#e6edf3', textAlign: 'center' }}>Manager Autorisatie</h2>
+            <p style={{ margin: '0 0 4px', fontSize: '12px', color: '#f0883e', textAlign: 'center', fontWeight: '500' }}>Korting boven 20% vereist manager PIN</p>
+            <p style={{ margin: '0 0 16px', fontSize: '11px', color: '#8b949e', textAlign: 'center' }}>Voer een manager of admin PIN in</p>
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '14px' }}>
+              {[0,1,2,3].map(i => (
+                <div key={i} style={{ width: '16px', height: '16px', borderRadius: '50%', border: '2px solid #30363d', background: i < managerPinInput.length ? '#f0883e' : 'rgba(255,255,255,0.1)' }} />
+              ))}
+            </div>
+
+            {managerPinError && <div style={{ textAlign: 'center', color: '#f85149', fontSize: '12px', marginBottom: '10px', fontWeight: '500' }}>{managerPinError}</div>}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px', marginBottom: '14px' }}>
+              {['1','2','3','4','5','6','7','8','9','C','0','⌫'].map(key => (
+                <button key={key} onClick={() => handleManagerPinKey(key)} style={{
+                  padding: '14px', border: '1px solid #30363d', borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.04)', color: key === 'C' ? '#f85149' : '#e6edf3',
+                  cursor: 'pointer', fontSize: '18px', fontWeight: 'bold',
+                }}>
+                  {key}
+                </button>
+              ))}
+            </div>
+
+            <button onClick={() => { setShowManagerPin(false); setPendingDiscountAction(null); }} style={{ width: '100%', padding: '10px', border: '1px solid #30363d', borderRadius: '8px', background: 'transparent', color: '#8b949e', cursor: 'pointer', fontSize: '13px' }}>
+              Annuleren
+            </button>
           </div>
         </div>
       )}
