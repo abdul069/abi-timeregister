@@ -2,7 +2,6 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/router';
-import styles from '../styles/globals.css';
 
 const Home = () => {
   const [email, setEmail] = useState('');
@@ -46,7 +45,7 @@ const Home = () => {
         localStorage.setItem('users', JSON.stringify(existingUsers));
         localStorage.setItem('currentUser', JSON.stringify({ email }));
         setLoading(false);
-        router.push('/dashboard');
+        router.push('/pos');
       } else {
         // Login: verify credentials
         const users = JSON.parse(localStorage.getItem('users') || '[]');
@@ -60,7 +59,7 @@ const Home = () => {
 
         localStorage.setItem('currentUser', JSON.stringify({ email }));
         setLoading(false);
-        router.push('/dashboard');
+        router.push('/pos');
       }
     } catch (err) {
       setError(err.message || 'An error occurred');
@@ -84,9 +83,12 @@ const Home = () => {
         width: '100%',
         maxWidth: '400px',
       }}>
-        <h1 style={{ textAlign: 'center', marginBottom: '30px' }}>
-          ABI TimeRegister
+        <h1 style={{ textAlign: 'center', marginBottom: '10px' }}>
+          FastFood POS
         </h1>
+        <p style={{ textAlign: 'center', marginBottom: '30px', color: '#888', fontSize: '14px' }}>
+          Kassasysteem
+        </p>
         <h2 style={{ textAlign: 'center', fontSize: '18px', marginBottom: '30px' }}>
           {isSignup ? 'Create Account' : 'Login'}
         </h2>
