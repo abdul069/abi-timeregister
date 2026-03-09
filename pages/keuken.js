@@ -128,7 +128,10 @@ export default function Keuken() {
                   <div key={i}>
                     <div style={styles.orderItem}>
                       <span style={styles.itemQty}>{item.quantity}x</span>
-                      <span style={styles.itemName}>{item.name}</span>
+                      <span style={styles.itemName}>
+                        {item.name}
+                        {item.variation && <span style={{ color: '#e67e22' }}> ({item.variation})</span>}
+                      </span>
                     </div>
                     {customParts.length > 0 && (
                       <div style={styles.itemCustom}>

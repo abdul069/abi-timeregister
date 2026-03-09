@@ -70,13 +70,6 @@ export default function PosHome() {
       color: '#27ae60',
       href: '/menubeheer',
     },
-    {
-      title: 'Urenregistratie',
-      icon: '⏰',
-      desc: 'Medewerkers tijdregistratie',
-      color: '#9b59b6',
-      href: '/dashboard',
-    },
   ];
 
   return (
