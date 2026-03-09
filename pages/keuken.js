@@ -113,12 +113,31 @@ export default function Keuken() {
             </div>
 
             <div style={styles.orderItems}>
-              {order.items.map((item, i) => (
-                <div key={i} style={styles.orderItem}>
-                  <span style={styles.itemQty}>{item.quantity}x</span>
-                  <span style={styles.itemName}>{item.name}</span>
-                </div>
-              ))}
+              {order.items.map((item, i) => {
+                const customParts = [];
+                if (item.customizations) {
+                  Object.entries(item.customizations).forEach(([key, val]) => {
+                    if (Array.isArray(val) && val.length > 0) {
+                      customParts.push(`${key}: ${val.join(', ')}`);
+                    } else if (typeof val === 'string' && val !== 'Geen saus') {
+                      customParts.push(`${key}: ${val}`);
+                    }
+                  });
+                }
+                return (
+                  <div key={i}>
+                    <div style={styles.orderItem}>
+                      <span style={styles.itemQty}>{item.quantity}x</span>
+                      <span style={styles.itemName}>{item.name}</span>
+                    </div>
+                    {customParts.length > 0 && (
+                      <div style={styles.itemCustom}>
+                        {customParts.join(' · ')}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
 
             <div style={styles.orderActions}>
@@ -276,6 +295,14 @@ const styles = {
   },
   itemName: {
     color: '#333',
+  },
+  itemCustom: {
+    fontSize: '12px',
+    color: '#888',
+    paddingLeft: '38px',
+    paddingBottom: '4px',
+    fontStyle: 'italic',
+    lineHeight: '1.3',
   },
   orderActions: {
     padding: '12px 16px',
