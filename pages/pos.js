@@ -127,7 +127,6 @@ export default function PosHome() {
     { title: 'Menu Beheer', icon: '📋', desc: 'Producten, modifiers & koppelingen', color: '#27ae60', href: '/menubeheer' },
     { title: 'Dagafsluiting', icon: '📑', desc: 'Werkperiode openen/sluiten', color: '#9b59b6', href: '/dagafsluiting' },
     { title: 'Personeel', icon: '👥', desc: 'Medewerkers & PIN beheer', color: '#1abc9c', href: '/personeel' },
-    { title: 'Business Intelligence', icon: '📡', desc: 'Subsidies, checks & dossiers', color: '#3b82f6', href: '/bi' },
   ];
 
   return (

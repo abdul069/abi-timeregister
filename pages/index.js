@@ -3,7 +3,7 @@ import { useRouter } from 'next/router';
 import { auth } from '../lib/firebase';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'firebase/auth';
 
-const Home = () => {
+export default function Home() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSignup, setIsSignup] = useState(false);
@@ -28,7 +28,7 @@ const Home = () => {
       } else {
         await signInWithEmailAndPassword(auth, email, password);
       }
-      router.push('/pos');
+      router.push('/bi');
     } catch (err) {
       const messages = {
         'auth/email-already-in-use': 'Dit e-mailadres is al in gebruik',
@@ -45,127 +45,71 @@ const Home = () => {
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      justifyContent: 'center',
-      alignItems: 'center',
-      minHeight: '100vh',
-      backgroundColor: '#f5f5f5',
-    }}>
-      <div style={{
-        backgroundColor: 'white',
-        padding: '40px',
-        borderRadius: '8px',
-        boxShadow: '0 2px 10px rgba(0,0,0,0.1)',
-        width: '100%',
-        maxWidth: '400px',
-      }}>
-        <h1 style={{ textAlign: 'center', marginBottom: '10px' }}>
-          FastFood POS
-        </h1>
-        <p style={{ textAlign: 'center', marginBottom: '30px', color: '#888', fontSize: '14px' }}>
-          Kassasysteem
-        </p>
-        <h2 style={{ textAlign: 'center', fontSize: '18px', marginBottom: '30px' }}>
+    <div style={s.container}>
+      <div style={s.card}>
+        <div style={s.logo}>📡</div>
+        <h1 style={s.title}>ABI Business Intelligence</h1>
+        <p style={s.subtitle}>Subsidies, compliance & dossiers</p>
+
+        <h2 style={s.formTitle}>
           {isSignup ? 'Account Aanmaken' : 'Inloggen'}
         </h2>
 
-        {error && (
-          <div style={{
-            backgroundColor: '#fee',
-            color: '#c33',
-            padding: '10px',
-            borderRadius: '4px',
-            marginBottom: '20px',
-            fontSize: '14px',
-          }}>
-            {error}
-          </div>
-        )}
+        {error && <div style={s.error}>{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '15px' }}>
-            <label htmlFor="email" style={{ display: 'block', marginBottom: '5px' }}>
-              Email
-            </label>
+          <div style={s.field}>
+            <label style={s.label}>Email</label>
             <input
-              id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Voer je e-mail in"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                boxSizing: 'border-box',
-                fontSize: '14px',
-              }}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="uw@email.be"
+              style={s.input}
             />
           </div>
 
-          <div style={{ marginBottom: '20px' }}>
-            <label htmlFor="password" style={{ display: 'block', marginBottom: '5px' }}>
-              Wachtwoord
-            </label>
+          <div style={s.field}>
+            <label style={s.label}>Wachtwoord</label>
             <input
-              id="password"
               type="password"
               value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Voer je wachtwoord in"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                boxSizing: 'border-box',
-                fontSize: '14px',
-              }}
+              onChange={e => setPassword(e.target.value)}
+              placeholder="Uw wachtwoord"
+              style={s.input}
             />
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '12px',
-              backgroundColor: loading ? '#ccc' : '#007bff',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '16px',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              marginBottom: '15px',
-            }}
-          >
+          <button type="submit" disabled={loading} style={{ ...s.submitBtn, opacity: loading ? 0.6 : 1 }}>
             {loading ? 'Laden...' : (isSignup ? 'Registreren' : 'Inloggen')}
           </button>
         </form>
 
         <button
-          onClick={() => {
-            setIsSignup(!isSignup);
-            setError('');
-          }}
-          style={{
-            width: '100%',
-            padding: '12px',
-            backgroundColor: '#6c757d',
-            color: 'white',
-            border: 'none',
-            borderRadius: '4px',
-            fontSize: '14px',
-            cursor: 'pointer',
-          }}
+          onClick={() => { setIsSignup(!isSignup); setError(''); }}
+          style={s.switchBtn}
         >
-          {isSignup ? 'Al een account? Inloggen' : "Geen account? Registreren"}
+          {isSignup ? 'Al een account? Inloggen' : 'Geen account? Registreren'}
         </button>
+
+        <p style={s.version}>ABI BI v1.0</p>
       </div>
     </div>
   );
-};
+}
 
-export default Home;
+const s = {
+  container: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)', padding: '20px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
+  card: { width: '100%', maxWidth: '400px', background: 'rgba(255,255,255,0.04)', borderRadius: '20px', border: '1px solid rgba(255,255,255,0.08)', padding: '40px 28px', textAlign: 'center' },
+  logo: { fontSize: '56px', marginBottom: '8px' },
+  title: { margin: '0 0 4px', fontSize: '22px', fontWeight: '800', color: '#f1f5f9', letterSpacing: '-0.5px' },
+  subtitle: { margin: '0 0 28px', fontSize: '13px', color: '#64748b' },
+  formTitle: { margin: '0 0 20px', fontSize: '16px', fontWeight: '600', color: '#94a3b8' },
+  error: { background: 'rgba(239,68,68,0.15)', color: '#f87171', padding: '10px 14px', borderRadius: '10px', fontSize: '13px', marginBottom: '16px', border: '1px solid rgba(239,68,68,0.2)' },
+  field: { marginBottom: '14px', textAlign: 'left' },
+  label: { display: 'block', fontSize: '12px', fontWeight: '600', color: '#94a3b8', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  input: { width: '100%', padding: '13px 16px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '12px', background: 'rgba(255,255,255,0.05)', color: '#f1f5f9', fontSize: '15px', outline: 'none', boxSizing: 'border-box' },
+  submitBtn: { width: '100%', padding: '14px', border: 'none', borderRadius: '12px', background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)', color: '#fff', fontSize: '16px', fontWeight: '700', cursor: 'pointer', marginTop: '6px', marginBottom: '12px' },
+  switchBtn: { width: '100%', padding: '12px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', background: 'transparent', color: '#64748b', fontSize: '13px', cursor: 'pointer' },
+  version: { margin: '20px 0 0', fontSize: '11px', color: '#334155' },
+};

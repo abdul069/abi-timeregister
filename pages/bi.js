@@ -1,6 +1,8 @@
 import { useRouter } from 'next/router';
 import { useState, useEffect } from 'react';
 import { getBedrijfsprofiel } from '../lib/bi-data';
+import { auth } from '../lib/firebase';
+import { signOut } from 'firebase/auth';
 
 export default function BIHub() {
   const router = useRouter();
@@ -66,7 +68,6 @@ export default function BIHub() {
       <div style={s.header}>
         <div>
           <div style={s.headerTop}>
-            <button onClick={() => router.push('/pos')} style={s.backBtn}>{'\u2190'} POS</button>
             <span style={s.badge}>BETA</span>
           </div>
           <h1 style={s.title}>Business Intelligence</h1>
@@ -101,6 +102,7 @@ export default function BIHub() {
 
       <div style={s.footer}>
         <span>ABI Business Intelligence v1.0</span>
+        <button onClick={async () => { await signOut(auth); router.push('/'); }} style={s.logoutBtn}>Uitloggen</button>
       </div>
     </div>
   );
@@ -126,5 +128,6 @@ const s = {
   cardDesc: { margin: '3px 0 8px', fontSize: '13px', color: '#94a3b8' },
   cardTag: { display: 'inline-block', padding: '3px 10px', borderRadius: '8px', border: '1px solid', fontSize: '10px', fontWeight: '600' },
   cardBar: { position: 'absolute', top: 0, bottom: 0, right: 0, width: '3px' },
-  footer: { padding: '16px 24px', textAlign: 'center', color: '#475569', fontSize: '11px' },
+  footer: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '16px', padding: '16px 24px', color: '#475569', fontSize: '11px' },
+  logoutBtn: { padding: '6px 14px', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', background: 'transparent', color: '#64748b', fontSize: '11px', cursor: 'pointer' },
 };
