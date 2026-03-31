@@ -94,3 +94,8 @@ th {
 tr:hover {
   background-color: #f9f9f9;
 }
+
+/* BI Spinner animation */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
