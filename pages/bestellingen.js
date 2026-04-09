@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { getOrders, formatPrice, getCategories } from '../lib/pos-data';
 
@@ -124,6 +124,141 @@ export default function Bestellingen() {
 
   const getCatInfo = (catId) => categories.find(c => c.id === catId) || { name: catId, icon: '📦', color: '#8b949e' };
 
+  // ===== EXPORT FUNCTIONS =====
+  const downloadCSV = (filename, headers, rows) => {
+    const BOM = '\uFEFF';
+    const csv = BOM + [headers.join(';'), ...rows.map(r => r.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';'))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const exportOrdersCSV = () => {
+    const headers = ['#', 'Datum', 'Tijd', 'Status', 'Type', 'Betaalmethode', 'Medewerker', 'Artikelen', 'Subtotaal', 'Korting', 'BTW', 'Totaal'];
+    const rows = displayOrders.map(o => {
+      const itemList = (o.items || []).map(i => `${i.quantity}x ${i.name}`).join(', ');
+      const discount = o.ticketDiscount
+        ? (o.ticketDiscount.type === 'percent' ? `${o.ticketDiscount.value}%` : formatPrice(o.ticketDiscount.value))
+        : '0';
+      return [o.number, o.date, o.time, o.status, o.orderType || '', o.paymentMethod || '', o.staffName || '', itemList, formatPrice(o.subtotal || o.total), discount, formatPrice(o.btw || 0), formatPrice(o.total)];
+    });
+    downloadCSV(`bestellingen_${selectedDate}.csv`, headers, rows);
+  };
+
+  const exportProductsCSV = () => {
+    const headers = ['Rang', 'Product', 'Categorie', 'Aantal', 'Omzet'];
+    const rows = popularItems.map((item, i) => {
+      const catInfo = getCatInfo(item.category);
+      return [i + 1, item.name, catInfo.name, item.qty, formatPrice(item.revenue)];
+    });
+    downloadCSV(`producten_${selectedDate}.csv`, headers, rows);
+  };
+
+  const exportFinancialCSV = () => {
+    const headers = ['Categorie', 'Waarde'];
+    const rows = [
+      ['Datum', selectedDate],
+      ['Totale Omzet', formatPrice(totalRevenue)],
+      ['Aantal Bestellingen', totalOrders],
+      ['Gem. Bestelling', formatPrice(avgOrderValue)],
+      ['BTW (9%)', formatPrice(totalBTW)],
+      ['Korting Totaal', formatPrice(totalDiscount)],
+      ['Geannuleerd', cancelledOrders.length],
+      ['', ''],
+      ['--- Betaalmethoden ---', ''],
+      ...Object.entries(paymentBreakdown).map(([m, a]) => [m === 'contant' ? 'Contant' : m === 'pin' ? 'PIN' : m, formatPrice(a)]),
+      ['', ''],
+      ['--- Besteltype ---', ''],
+      ['Afhalen', `${orderTypeBreakdown['afhalen']}x`],
+      ['Ter Plaatse', `${orderTypeBreakdown['ter plaatse']}x`],
+      ['Bezorgen', `${orderTypeBreakdown['bezorgen']}x`],
+      ['', ''],
+      ['--- Categorieen ---', ''],
+      ...sortedCategories.map(c => [getCatInfo(c.name).name, `${c.count} items - ${formatPrice(c.revenue)}`]),
+      ['', ''],
+      ['--- Medewerkers ---', ''],
+      ...staffPerformance.map(sp => [sp.name, `${sp.orders}x - ${formatPrice(sp.revenue)}`]),
+    ];
+    downloadCSV(`dagrapport_${selectedDate}.csv`, headers, rows);
+  };
+
+  const exportPDF = () => {
+    const w = window.open('', '_blank', 'width=800,height=900');
+    if (!w) return;
+    const paymentRows = Object.entries(paymentBreakdown).map(([m, a]) => {
+      const label = m === 'contant' ? 'Contant' : m === 'pin' ? 'PIN' : m === 'online' ? 'Online' : m;
+      return `<tr><td>${label}</td><td style="text-align:right">${formatPrice(a)}</td></tr>`;
+    }).join('');
+    const catRows = sortedCategories.map(c => {
+      const info = getCatInfo(c.name);
+      return `<tr><td>${info.icon} ${info.name}</td><td style="text-align:center">${c.count}</td><td style="text-align:right">${formatPrice(c.revenue)}</td></tr>`;
+    }).join('');
+    const staffRows = staffPerformance.map(sp =>
+      `<tr><td>${sp.name}</td><td style="text-align:center">${sp.orders}</td><td style="text-align:right">${formatPrice(sp.revenue)}</td></tr>`
+    ).join('');
+    const topItems = popularItems.slice(0, 10).map((it, i) =>
+      `<tr><td>#${i + 1}</td><td>${it.name}</td><td style="text-align:center">${it.qty}x</td><td style="text-align:right">${formatPrice(it.revenue)}</td></tr>`
+    ).join('');
+    const hourRows = Object.entries(hourlyData).filter(([, d]) => d.orders > 0).map(([h, d]) =>
+      `<tr><td>${h}:00</td><td style="text-align:center">${d.orders}</td><td style="text-align:right">${formatPrice(d.revenue)}</td></tr>`
+    ).join('');
+
+    w.document.write(`<!DOCTYPE html><html><head><title>Dagrapport ${selectedDate}</title>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 32px; color: #1a1a1a; font-size: 12px; }
+      h1 { font-size: 22px; margin-bottom: 4px; }
+      h2 { font-size: 14px; margin: 20px 0 8px; padding-bottom: 4px; border-bottom: 2px solid #333; }
+      .subtitle { color: #666; margin-bottom: 20px; font-size: 13px; }
+      .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 16px 0; }
+      .kpi { border: 1px solid #ddd; border-radius: 8px; padding: 12px; text-align: center; }
+      .kpi-val { font-size: 20px; font-weight: bold; }
+      .kpi-label { font-size: 10px; color: #666; text-transform: uppercase; margin-top: 2px; }
+      table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+      th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid #eee; font-size: 11px; }
+      th { background: #f5f5f5; font-weight: 700; font-size: 10px; text-transform: uppercase; }
+      .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+      .footer { margin-top: 30px; text-align: center; font-size: 10px; color: #999; border-top: 1px solid #ddd; padding-top: 10px; }
+      @media print { body { padding: 16px; } .no-print { display: none; } }
+    </style></head><body>
+    <button class="no-print" onclick="window.print()" style="float:right;padding:8px 16px;background:#238636;color:#fff;border:none;border-radius:6px;cursor:pointer;font-weight:bold">Print / PDF</button>
+    <h1>Dagrapport</h1>
+    <div class="subtitle">${selectedDate} · FastFood POS</div>
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-val" style="color:#16a34a">${formatPrice(totalRevenue)}</div><div class="kpi-label">Totale Omzet</div></div>
+      <div class="kpi"><div class="kpi-val">${totalOrders}</div><div class="kpi-label">Bestellingen</div></div>
+      <div class="kpi"><div class="kpi-val">${formatPrice(avgOrderValue)}</div><div class="kpi-label">Gem. Bestelling</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:#dc2626">${cancelledOrders.length}</div><div class="kpi-label">Geannuleerd</div></div>
+    </div>
+    <div class="kpi-grid" style="grid-template-columns: repeat(2, 1fr)">
+      <div class="kpi"><div class="kpi-val">${formatPrice(totalBTW)}</div><div class="kpi-label">BTW (9%)</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:#dc2626">-${formatPrice(totalDiscount)}</div><div class="kpi-label">Korting</div></div>
+    </div>
+    <div class="two-col">
+      <div><h2>Betaalmethoden</h2><table><thead><tr><th>Methode</th><th style="text-align:right">Bedrag</th></tr></thead><tbody>${paymentRows || '<tr><td colspan="2">Geen data</td></tr>'}</tbody></table></div>
+      <div><h2>Besteltype</h2><table><thead><tr><th>Type</th><th style="text-align:right">Aantal</th></tr></thead><tbody>
+        <tr><td>Afhalen</td><td style="text-align:right">${orderTypeBreakdown['afhalen']}x</td></tr>
+        <tr><td>Ter Plaatse</td><td style="text-align:right">${orderTypeBreakdown['ter plaatse']}x</td></tr>
+        <tr><td>Bezorgen</td><td style="text-align:right">${orderTypeBreakdown['bezorgen']}x</td></tr>
+      </tbody></table></div>
+    </div>
+    <h2>Omzet per Uur</h2>
+    <table><thead><tr><th>Uur</th><th style="text-align:center">Orders</th><th style="text-align:right">Omzet</th></tr></thead><tbody>${hourRows || '<tr><td colspan="3">Geen data</td></tr>'}</tbody></table>
+    <div class="two-col">
+      <div><h2>Categorieen</h2><table><thead><tr><th>Categorie</th><th style="text-align:center">Items</th><th style="text-align:right">Omzet</th></tr></thead><tbody>${catRows || '<tr><td colspan="3">Geen data</td></tr>'}</tbody></table></div>
+      <div><h2>Medewerkers</h2><table><thead><tr><th>Naam</th><th style="text-align:center">Orders</th><th style="text-align:right">Omzet</th></tr></thead><tbody>${staffRows || '<tr><td colspan="3">Geen data</td></tr>'}</tbody></table></div>
+    </div>
+    <h2>Top 10 Producten</h2>
+    <table><thead><tr><th>#</th><th>Product</th><th style="text-align:center">Aantal</th><th style="text-align:right">Omzet</th></tr></thead><tbody>${topItems || '<tr><td colspan="4">Geen data</td></tr>'}</tbody></table>
+    <div class="footer">Gegenereerd op ${new Date().toLocaleString('nl-NL')} · FastFood POS Systeem</div>
+    </body></html>`);
+    w.document.close();
+  };
+
   if (loading) return <div style={{ padding: '40px', textAlign: 'center', color: '#e6edf3', background: '#0d1117', minHeight: '100vh' }}>Laden...</div>;
 
   return (
@@ -131,6 +266,15 @@ export default function Bestellingen() {
       <div style={s.topBar}>
         <button onClick={() => router.push('/pos')} style={s.backBtn}>← Terug</button>
         <h1 style={s.title}>Bestellingen & Rapporten</h1>
+
+        <div style={s.exportGroup}>
+          <button onClick={exportPDF} style={s.exportBtn} title="Dagrapport PDF">
+            <span style={{ fontSize: '14px' }}>📄</span> PDF
+          </button>
+          <button onClick={exportFinancialCSV} style={s.exportBtn} title="Financieel CSV">
+            <span style={{ fontSize: '14px' }}>📊</span> CSV
+          </button>
+        </div>
 
         <div style={s.dateNav}>
           <button onClick={() => goDate(-1)} style={s.dateArrow}>‹</button>
@@ -320,6 +464,9 @@ export default function Bestellingen() {
           <div style={s.card}>
             <div style={s.orderHeader}>
               <h3 style={{ ...s.cardTitle, margin: 0 }}>Alle Bestellingen</h3>
+              <button onClick={exportOrdersCSV} style={{ ...s.exportBtn, marginRight: '8px' }} title="Bestellingen CSV">
+                <span style={{ fontSize: '12px' }}>📥</span> CSV Export
+              </button>
               <div style={s.orderFilters}>
                 {[
                   { id: 'alle', label: 'Alle' },
@@ -422,7 +569,12 @@ export default function Bestellingen() {
         {/* ====== PRODUCTEN TAB ====== */}
         {tab === 'producten' && (
           <div style={s.card}>
-            <h3 style={s.cardTitle}>Product Ranking</h3>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+              <h3 style={{ ...s.cardTitle, margin: 0 }}>Product Ranking</h3>
+              <button onClick={exportProductsCSV} style={s.exportBtn} title="Producten CSV">
+                <span style={{ fontSize: '12px' }}>📥</span> CSV Export
+              </button>
+            </div>
             {popularItems.length === 0 && <div style={s.noData}>Geen productdata voor deze dag</div>}
             <div style={s.productList}>
               {popularItems.map((item, i) => {
@@ -460,6 +612,8 @@ const s = {
   dateArrow: { padding: '6px 12px', border: '1px solid #30363d', borderRadius: '6px', background: 'transparent', color: '#e6edf3', cursor: 'pointer', fontSize: '16px', fontWeight: 'bold' },
   dateInput: { padding: '7px 12px', border: '1px solid #30363d', borderRadius: '8px', background: '#0d1117', color: '#e6edf3', fontSize: '14px', cursor: 'pointer', colorScheme: 'dark' },
   todayBtn: { padding: '7px 14px', border: '1px solid #238636', borderRadius: '8px', background: 'rgba(35,134,54,0.15)', color: '#3fb950', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer' },
+  exportGroup: { display: 'flex', gap: '6px' },
+  exportBtn: { display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', border: '1px solid #30363d', borderRadius: '8px', background: 'rgba(88,166,255,0.08)', color: '#58a6ff', cursor: 'pointer', fontSize: '12px', fontWeight: '600', whiteSpace: 'nowrap', transition: 'all 0.15s' },
 
   tabBar: { display: 'flex', gap: '4px', padding: '10px 24px', background: '#161b22', borderBottom: '1px solid #30363d' },
   tabBtn: { display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', border: '1px solid transparent', borderRadius: '8px', background: 'transparent', color: '#8b949e', cursor: 'pointer', fontSize: '13px', fontWeight: '600' },
